@@ -165,7 +165,7 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                 if torch.sum(abs(generated_policy_weights)) == 0:
                     if render:
                         print('\nThe NCA produce an empty pattern, skipping simulation of the environment.\n')
-                    return np.Inf
+                    return np.inf
 
             penalty = 0
             

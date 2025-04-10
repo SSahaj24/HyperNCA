@@ -121,7 +121,7 @@ class CellCAModel3D(TorchModule):
 
     def update(self, x):
         alive_thresdhold =  self.alpha_living_threshold * self.alive(x).max()
-        if torch.isnan(alive_thresdhold): alive_thresdhold = np.NINF
+        if torch.isnan(alive_thresdhold): alive_thresdhold = -np.inf
         pre_life_mask = self.alive(x) > alive_thresdhold
 
         out = self.perceive(x)
@@ -151,7 +151,7 @@ class CellCAModel3D(TorchModule):
         
         
         alive_thresdhold =  self.alpha_living_threshold * self.alive(x).max()
-        if torch.isnan(alive_thresdhold): alive_thresdhold = np.NINF
+        if torch.isnan(alive_thresdhold): alive_thresdhold = -np.inf
         post_life_mask = self.alive(x) > alive_thresdhold
         
         life_mask = (pre_life_mask & post_life_mask) 

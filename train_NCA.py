@@ -115,7 +115,7 @@ def train(args):
         "NCA_steps" : args['NCA_steps'],    
         "update_net_channel_dims" : args['update_net_channel_dims'],    
         "batch_size" : 1,                   
-        "alpha_living_threshold": args['living_threshold'] if args['living_threshold'] != 0 else np.NINF, # alive: percentage thereshold of abs mean value
+        "alpha_living_threshold": args['living_threshold'] if args['living_threshold'] != 0 else -np.inf, # alive: percentage thereshold of abs mean value
         "seed_type" : seeds_type,
         "random_seed" : args['random_seed'],
         "seeds" : seeds,
@@ -170,8 +170,8 @@ def train(args):
     tic = time.time()
     
     args_fit = (nca_config,)
-    solution_best_reward = np.Inf
-    solution_mean_reward = np.Inf
+    solution_best_reward = np.inf
+    solution_mean_reward = np.inf
     rewards_mean = []
     rewards_best = []
     gen = 0

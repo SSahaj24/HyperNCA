@@ -25,4 +25,6 @@ outcmaes/
 test.py
 experiments/
 *.mp4
-saved_models_metamorphosis/
+saved_models_metamorphosis/hnca_env/
+saved_models/
+.cursor/
