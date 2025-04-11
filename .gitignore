@@ -28,3 +28,4 @@ experiments/
 saved_models_metamorphosis/hnca_env/
 saved_models/
 .cursor/
+myenv/
