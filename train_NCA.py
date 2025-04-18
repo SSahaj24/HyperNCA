@@ -10,7 +10,6 @@ import pathlib
 import yaml
 import datetime
 import gym
-import wandb
 
 from fitness_functions import fitnessRL
 from policies import MLPn
@@ -34,30 +33,6 @@ def x0_sampling(dist, nb_params):
         raise ValueError('Distribution not available')
 
 def train(args):
-    
-    # Initialize wandb
-    if args['use_wandb']:
-        wandb.init(
-            project="nca-rl-optimization",
-            config={
-                "generations": args['generations'],
-                "popsize": args['popsize'],
-                "NCA_steps": args['NCA_steps'],
-                "NCA_dimension": args['NCA_dimension'],
-                "policy_layers": args['policy_layers'],
-                "living_threshold": args['living_threshold'],
-                "NCA_channels": args['NCA_channels'],
-                "update_net_channel_dims": args['update_net_channel_dims'],
-                "size_substrate": args['size_substrate'],
-                "environment": args['environment'],
-                "seed_type": args['seed_type'],
-                "sigma_init": args['sigma_init'],
-                "plastic": args['plastic'],
-                "normalize": args['normalise'],
-                "NCA_bias": args['NCA_bias'],
-                "neighborhood": args['neighborhood']
-            }
-        )
     
     if args['save_model']: # prevent printing during experiments
         print('\n')
@@ -132,6 +107,8 @@ def train(args):
         
     # NCA config
     nca_config = {
+        "noise_std": 0.02,     # Adjust noise level
+        "dropout_rate": 0.05, # Adjust dropout probability
         "environment" : args['environment'],
         "popsize" : args['popsize'],
         "generations" : args['generations'],
@@ -140,7 +117,7 @@ def train(args):
         "NCA_steps" : args['NCA_steps'],    
         "update_net_channel_dims" : args['update_net_channel_dims'],    
         "batch_size" : 1,                   
-        "alpha_living_threshold": args['living_threshold'] if args['living_threshold'] != 0 else -np.inf, # alive: percentage thereshold of abs mean value
+        "alpha_living_threshold": args['living_threshold'] if args['living_threshold'] != 0 else np.NINF, # alive: percentage thereshold of abs mean value
         "seed_type" : seeds_type,
         "random_seed" : args['random_seed'],
         "seeds" : seeds,
@@ -195,8 +172,8 @@ def train(args):
     tic = time.time()
     
     args_fit = (nca_config,)
-    solution_best_reward = np.inf
-    solution_mean_reward = np.inf
+    solution_best_reward = np.Inf
+    solution_mean_reward = np.Inf
     rewards_mean = []
     rewards_best = []
     gen = 0
@@ -234,16 +211,6 @@ def train(args):
                     solution_mean_reward = solution_current_mean_eval
                     solution_mean = es.mean
 
-                # Log to wandb
-                if args['use_wandb'] and gen % args['wandb_log_interval'] == 0:
-                    wandb.log({
-                        "generation": gen,
-                        "best_reward": -solution_best_reward,
-                        "mean_reward": -solution_mean_reward,
-                        "current_best_reward": -solution_current_best,
-                        "current_mean_reward": -solution_current_mean_eval
-                    })
-
                 gen += 1
 
             except KeyboardInterrupt: # Only works with python mp
@@ -253,7 +220,6 @@ def train(args):
                 break
             
             # Early stopping of evolution
-            environment = args['environment'][0] if isinstance(args['environment'], list) else args['environment']
             if ( ('Lander' in environment ) and (gen == 1000 and solution_current_best > 0) ) or ( ('Ant' in environment ) and (gen == 1000 and solution_current_best > -500) ):
                 print(f'\nReward too low {solution_current_best} at generation {gen}.\n\nUnpromising run! Stopping evolution.\n')
                 print(20*'*'+'\n')
@@ -311,100 +277,17 @@ def train(args):
             if key != 'seeds':
                 print(key,':',value)
     
-    # Log final results to wandb
-    if args['use_wandb']:
-        wandb.log({
-            "final_best_reward": -solution_best_reward,
-            "final_mean_reward": -solution_mean_reward,
-            "training_time_seconds": int(toc-tic)
-        })
-        wandb.finish()
     
     return rewards_best, rewards_mean
-
-def wandb_sweep():
-    """
-    Run a sweep with wandb to optimize hyperparameters.
-    """
-    sweep_config = {
-        'method': 'bayes',  # Bayesian optimization
-        'metric': {
-            'name': 'final_best_reward',
-            'goal': 'maximize'
-        },
-        'parameters': {
-            'popsize': {
-                'values': [32, 64, 128, 256]
-            },
-            'NCA_steps': {
-                'min': 10,
-                'max': 50
-            },
-            'NCA_dimension': {
-                'value': 3  # Fixed to 3D
-            },
-            'policy_layers': {
-                'values': [2, 3, 4, 5]
-            },
-            'living_threshold': {
-                'min': 0.0,
-                'max': 0.5
-            }
-        }
-    }
-    
-    sweep_id = wandb.sweep(sweep_config, project="nca-rl-hyperparameter-sweep")
-    
-    def sweep_train():
-        wandb.init()
-        
-        # Get hyperparameters from wandb
-        config = wandb.config
-        
-        # Create args dictionary with default values and update with wandb config
-        args = {
-            'environment': ['LunarLander-v2'],
-            'generations': 250,  # Hardcoded to 250
-            'popsize': config.popsize,
-            'print_every': 10,
-            'x0_dist': 'U[-1,1]',
-            'sigma_init': 0.1,
-            'threads': 8,
-            'seed_type': 'randomU2',
-            'NCA_steps': config.NCA_steps,
-            'NCA_dimension': config.NCA_dimension,
-            'size_substrate': 0,
-            'NCA_channels': 2,
-            'reading_channel': 0,
-            'update_net_channel_dims': 4,
-            'living_threshold': config.living_threshold,
-            'policy_layers': config.policy_layers,
-            'NCA_bias': False,
-            'neighborhood': 'Moore',
-            'save_model': True,
-            'random_seed': False,
-            'random_seed_env': True,
-            'normalise': True,
-            'replace': False,
-            'co_evolve_seed': False,
-            'plastic': False,
-            'use_wandb': True,
-            'wandb_log_interval': 10
-        }
-        
-        train(args)
-    
-    # Run the sweep
-    wandb.agent(sweep_id, sweep_train, count=30)  # Run 30 trials
 
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
     parser.add_argument('--environment', type=str, default=['LunarLander-v2'], nargs='+', metavar='', help='Environment: any state-vector OpenAI Gym or pyBullet environment may be used')
     # parser.add_argument('--environment', type=str, default=['AntBulletEnv-v0'] , nargs='+', metavar='', help='Environments: any OpenAI Gym or pyBullet environment may be used')
-    parser.add_argument('--generations', type=int, default=10000, metavar='', help='Number of generations that the ES will run.')
+    parser.add_argument('--generations', type=int, default=1000, metavar='', help='Number of generations that the ES will run.')
     parser.add_argument('--popsize', type=int,  default=64, metavar='', help='Population size.')
-    parser.add_argument('--print_every', type=int, default=10, metavar='', help='Print every N steps.') 
+    parser.add_argument('--print_every', type=int, default=100, metavar='', help='Print every N steps.') 
     parser.add_argument('--x0_dist', type=str, default='U[-1,1]', metavar='', help='Distribution used to sample intial value for CMA-ES') 
     parser.add_argument('--sigma_init', type=float,  default=0.1 , metavar='', help='Initial sigma: modulates the amount of noise used to populate each new generation. Choose carefully: NCA very senstive to weights > 1')
     parser.add_argument('--threads', type=int, metavar='', default=-1, help='Number of threads used to run evolution in parallel: -1 uses all physical cores available, 0 uses a single core and avoids the multiprocessing library.')
@@ -429,14 +312,6 @@ if __name__ == "__main__":
     parser.add_argument('--co_evolve_seed', default=False, action=argparse.BooleanOptionalAction, help='If true, it co-evolve the initial seed')
     parser.add_argument('--plastic', default=False, action=argparse.BooleanOptionalAction, help='Makes the policy netowork plastic')
     
-    # Add wandb-related arguments
-    parser.add_argument('--use_wandb', default=False, action=argparse.BooleanOptionalAction, help='Use Weights & Biases for experiment tracking')
-    parser.add_argument('--wandb_log_interval', type=int, default=10, metavar='', help='Log to wandb every N generations')
-    parser.add_argument('--run_sweep', default=False, action=argparse.BooleanOptionalAction, help='Run a wandb sweep for hyperparameter optimization')
-    
     args = parser.parse_args()
     
-    if args.run_sweep:
-        wandb_sweep()
-    else:
-        train(vars(args))
+    train(vars(args))
