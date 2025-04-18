@@ -85,6 +85,8 @@ class CellCAModel3D(TorchModule):
     DEFAULT_CONFIG = {
         "perception_net_class":CellPerceptionNet,
         "update_net_class":SmallerCellUpdateNet,
+        "noise_std": 0.0,     # Gaussian noise standard deviation
+        "dropout_rate": 0.0,  # Cell dropout probability
     }
 
     def __init__(self, config):
@@ -109,6 +111,8 @@ class CellCAModel3D(TorchModule):
         self.replace = self.config.get('replace')
         self.debugging = self.config.get('debugging')
         self.tanh = torch.nn.Tanh()
+        self.noise_std = self.config.get("noise_std",0)
+        self.dropout_rate = self.config.get("dropout_rate",0)
 
             
 
@@ -121,12 +125,25 @@ class CellCAModel3D(TorchModule):
 
     def update(self, x):
         alive_thresdhold =  self.alpha_living_threshold * self.alive(x).max()
-        if torch.isnan(alive_thresdhold): alive_thresdhold = -np.inf
+        if torch.isnan(alive_thresdhold): alive_thresdhold = np.NINF
         pre_life_mask = self.alive(x) > alive_thresdhold
 
         out = self.perceive(x)
+
+        # noise_std = self.config.get("noise_std", 0.01)
+        # out = out + torch.randn_like(out) * noise_std
+        if self.noise_std > 0:
+            noise = torch.randn_like(out) * self.noise_std
+            out = out + noise
+
         out = self.update_network(out)
         
+        if self.dropout_rate>0:
+            living_cells = (self.alive(x) > 0).double().unsqueeze(1)
+            dropout_mask = (torch.rand_like(x[:, :1]) > self.dropout_rate).double()
+            final_mask = dropout_mask * living_cells
+            out = out * final_mask
+
         if self.debugging:
             for layer in list(self.perception_net.parameters()):
                 print(f"perception_net layer weight max: {layer.max()}, min: {layer.min()}")
@@ -151,7 +168,7 @@ class CellCAModel3D(TorchModule):
         
         
         alive_thresdhold =  self.alpha_living_threshold * self.alive(x).max()
-        if torch.isnan(alive_thresdhold): alive_thresdhold = -np.inf
+        if torch.isnan(alive_thresdhold): alive_thresdhold = np.NINF
         post_life_mask = self.alive(x) > alive_thresdhold
         
         life_mask = (pre_life_mask & post_life_mask) 
@@ -188,6 +205,17 @@ class CellCAModel3D(TorchModule):
                 camera_layers = visualiseVoxs2Dmulti(x, camera_layers, fig2, ax2, step, None)
             
             x, life_mask = self.update(x)
+
+            #  # Add Gaussian noise during training
+            # x = self._add_gaussian_noise(x)
+            
+            # # Apply cell dropout during training
+            # x = self._apply_cell_dropout(x)
+            
+            # # Update alive mask after modifications
+            # life_mask = self.get_alive_mask(x)
+            # x = x * life_mask
+
             x[:,:,-1,inOutdim[1]:,:] = 0.0 
             
             if run_pca:
@@ -216,3 +244,28 @@ class CellCAModel3D(TorchModule):
         return x, weights_for_pca
     
 
+    # def _add_gaussian_noise(self, x):
+    #     """Add Gaussian noise to cell states"""
+    #     if self.noise_std > 0 and self.training:
+    #         noise = torch.randn_like(x) * self.noise_std
+    #         return x + noise
+    #     return x
+
+    # def _apply_cell_dropout(self, x):
+    #     """Randomly zero out complete cells"""
+    #     if self.dropout_rate > 0 and self.training:
+    #         batch_size = x.size(0)
+    #         spatial_dims = x.shape[2:]
+    #         mask = torch.bernoulli(
+    #             (1 - self.dropout_rate) * torch.ones((batch_size, 1) + spatial_dims, device=x.device)
+    #         ).expand_as(x)
+    #         return x * mask
+    #     return x
+
+    # def get_alive_mask(self, x):
+    #     """Update alive mask considering any modifications"""
+    #     alive_thresdhold = self.alpha_living_threshold * self.alive(x).max()
+    #     if torch.isnan(alive_thresdhold):
+    #         alive_thresdhold = np.NINF
+    #     life_mask = (self.alive(x) > alive_thresdhold).float()
+    #     return life_mask
