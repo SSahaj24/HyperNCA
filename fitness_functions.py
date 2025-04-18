@@ -28,6 +28,9 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
 
     with torch.no_grad():
         
+        # Get the device (GPU if available, else CPU)
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
         cum_reward = 0
         seed_offset = 0
         for i, environment in enumerate(nca_config['environment']):
@@ -63,7 +66,9 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
             if nca_config['NCA_dimension'] == 2:
                 raise NotImplementedError
             elif nca_config['NCA_dimension'] == 3:
-                p = MLPn(input_space=nca_config['size_substrate'], action_space=action_dim, hidden_dim=nca_config['size_substrate'], bias=False, layers=nca_config['policy_layers']) 
+                p = MLPn(input_space=nca_config['size_substrate'], action_space=action_dim, hidden_dim=nca_config['size_substrate'], bias=False, layers=nca_config['policy_layers'])
+                # Move policy to device
+                p = p.to(device)
             
             for param in p.parameters():
                 param.requires_grad = False
@@ -76,7 +81,11 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                 if nca_config['NCA_MLP']:
                     raise NotImplementedError
                 else:
-                    ca = CellCAModel3D(nca_config)            
+                    # Update nca_config to include device
+                    nca_config_with_device = nca_config.copy()
+                    nca_config_with_device['device'] = device
+                    ca = CellCAModel3D(nca_config_with_device)
+                    
             nca_nb_weights = torch.nn.utils.parameters_to_vector(ca.parameters()).shape[0] 
             
             if render:
@@ -89,8 +98,9 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                 if nca_config['plastic']: print('Plastic Policy network') 
                 print('.......................................................\n')
             
-            # Load evolved weights into the NCA
-            nn.utils.vector_to_parameters( torch.tensor (evolved_parameters[:nca_nb_weights], dtype=torch.float64 ),  ca.parameters() )
+            # Load evolved weights into the NCA - move to device first
+            evolved_params_tensor = torch.tensor(evolved_parameters[:nca_nb_weights], dtype=torch.float64, device=device)
+            nn.utils.vector_to_parameters(evolved_params_tensor, ca.parameters())
                 
                 
             observation = env.reset().astype(np.float64)
@@ -103,11 +113,13 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                     raise NotImplementedError
                 elif nca_config['NCA_dimension'] == 3:
                     seed = generate_seeds3D(policy_layers_parameters(p), nca_config['seed_type'][i], nca_config['NCA_channels'], observation, environment)
+                    # Move seed to device
+                    seed = seed.to(device)
             
             # Load co-evolved seed
             elif nca_config['co_evolve_seed']:
                 sp = nca_config['seeds_shapes'][i]
-                evolved_seed = torch.tensor(evolved_parameters[nca_nb_weights + seed_offset : nca_nb_weights + seed_offset + nca_config['seeds_size'][i]])
+                evolved_seed = torch.tensor(evolved_parameters[nca_nb_weights + seed_offset : nca_nb_weights + seed_offset + nca_config['seeds_size'][i]], device=device)
                 if nca_config['NCA_dimension'] == 2: 
                     raise NotImplementedError
                 if nca_config['NCA_dimension'] == 3:
@@ -118,6 +130,8 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
             # Load fix seed
             else:
                 seed = nca_config['seeds'][i]
+                # Move seed to device
+                seed = seed.to(device)
             
             # Generate policy networks with the NCA
             if not nca_config['plastic']:
@@ -192,12 +206,17 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                     observation = (observation == torch.arange(env.observation_space.n))
 
                 
-                o3 = p(torch.tensor(observation))
+                # Move observation to device for policy inference
+                obs_tensor = torch.tensor(observation, device=device)
+                o3 = p(obs_tensor)
+                
+                # Move action back to CPU for environment step
+                o3_cpu = o3.cpu() if o3.is_cuda else o3
                 
                 # # Bounding the action space
                 if environment == 'CarRacing-v0':
-                    action = np.array([ torch.tanh(o3[0]), torch.sigmoid(o3[1]), torch.sigmoid(o3[2]) ]) 
-                    o3 = o3.numpy()
+                    action = np.array([ torch.tanh(o3_cpu[0]), torch.sigmoid(o3_cpu[1]), torch.sigmoid(o3_cpu[2]) ]) 
+                    o3 = o3_cpu.numpy()
                 elif 'Bullet' in environment or str(env.action_space)[0:14] == 'Box(-1.0, 1.0,' or mujoco_env:
                     o3 = np.tanh(o3).numpy()
                     action = o3

@@ -17,11 +17,20 @@ from policies import MLPn
 from NCA_3D import CellCAModel3D
 from utils_and_wrappers import generate_seeds3D, plots_rewads_save, policy_layers_parameters, dimensions_env
 
-from cma.optimization_tools import EvalParallel2
+# Import for GPU parallel processing
+from torch.multiprocessing import Pool, set_start_method
+import os
 
-torch.set_num_threads(1)
-torch.set_num_interop_threads(1)
+# Remove CPU thread limits for better GPU utilization
+# torch.set_num_threads(1)  # Removing this restriction for GPU parallelization
+# torch.set_num_interop_threads(1)  # Removing this restriction for GPU parallelization
 torch.set_default_dtype(torch.float64)
+
+# Try to set start method for multiprocessing
+try:
+    set_start_method('spawn', force=True)
+except RuntimeError:
+    pass
 
 def x0_sampling(dist, nb_params):
     if dist == 'U[0,1]':
@@ -32,6 +41,38 @@ def x0_sampling(dist, nb_params):
         return np.random.randn(nb_params)
     else:
         raise ValueError('Distribution not available')
+
+# GPU parallel fitness evaluation function
+def parallel_fitness_eval(inputs):
+    candidate, args_fit = inputs
+    return fitnessRL(candidate, args_fit)
+
+# Custom parallel evaluator using GPU
+class GPUEvalParallel:
+    def __init__(self, func, num_workers=None):
+        self.func = func
+        self.num_gpus = torch.cuda.device_count()
+        self.num_workers = num_workers if num_workers is not None else self.num_gpus
+        self.pool = None
+        self.is_gpu_available = self.num_gpus > 0
+        
+        if self.is_gpu_available:
+            print(f"Found {self.num_gpus} GPU devices. Using GPU parallelization.")
+        else:
+            print("No GPU devices found. Falling back to CPU parallelization.")
+    
+    def __enter__(self):
+        self.pool = Pool(processes=self.num_workers)
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.pool.close()
+        self.pool.join()
+    
+    def __call__(self, candidates, args):
+        inputs = [(candidate, args[0]) for candidate in candidates]
+        results = self.pool.map(parallel_fitness_eval, inputs)
+        return results
 
 def train(args):
     
@@ -83,7 +124,10 @@ def train(args):
         if args['NCA_dimension'] == 2:
             raise NotImplementedError
         elif args['NCA_dimension'] == 3:
-            p = MLPn(input_space=input_dim, action_space=action_dim, hidden_dim=args['size_substrate'], bias=False, layers=args['policy_layers']) 
+            # Use GPU if available
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            p = MLPn(input_space=input_dim, action_space=action_dim, hidden_dim=args['size_substrate'], bias=False, layers=args['policy_layers'])
+            p = p.to(device)
         
         if seeds_type[i] == 'activations':
             env = gym.make(environment)
@@ -100,6 +144,8 @@ def train(args):
                 raise NotImplementedError
             elif args['NCA_dimension'] == 3:
                 seed = generate_seeds3D(policy_layers_parameters(p), seeds_type[i], args['NCA_channels'], observation, environment)
+                # Move seed to the appropriate device
+                seed = seed.to(device)
 
         else:
             seed = None
@@ -127,7 +173,9 @@ def train(args):
                 if args['NCA_dimension'] == 2:
                     raise NotImplementedError
                 elif args['NCA_dimension'] == 3:
-                    seed_flatten = seed.flatten().detach().numpy()
+                    # Move to CPU for numpy flattening if needed
+                    seed_cpu = seed.cpu() if seed.is_cuda else seed
+                    seed_flatten = seed_cpu.flatten().detach().numpy()
                 seeds_flatten.append(seed_flatten)
         
     # NCA config
@@ -161,6 +209,8 @@ def train(args):
         "seeds_size" : [seeds_flatten[i].shape[0] if args['co_evolve_seed'] else None for i in range(len(seeds_flatten))],
         "nb_envs" : len(environments),
         "policy_layers" : args['policy_layers'],
+        # Add device configuration - will be updated for each worker during parallel processing
+        "device" : "cuda" if torch.cuda.is_available() else "cpu",
     }
     
     if nca_config['NCA_dimension'] == 2:
@@ -169,7 +219,10 @@ def train(args):
         if nca_config['NCA_MLP']:
             raise NotImplementedError
         else:
-            ca = CellCAModel3D(nca_config)    
+            # Create a model to determine the number of weights
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            ca = CellCAModel3D(nca_config)
+            ca = ca.to(device)  
     
     # Parameters dimensions
     nca_nb_weights = torch.nn.utils.parameters_to_vector(ca.parameters()).shape[0]
@@ -200,20 +253,26 @@ def train(args):
     rewards_mean = []
     rewards_best = []
     gen = 0
-        
-    num_cores = psutil.cpu_count(logical = False) if args['threads'] == -1 else args['threads']    
-    print(f'\nUsing {num_cores} cores\n')
     
-    # Optimisation loop
+    # Determine number of workers based on GPU count and user preference
+    num_gpus = torch.cuda.device_count()
+    if num_gpus > 0:
+        num_workers = min(num_gpus, args['threads']) if args['threads'] > 0 else num_gpus
+        print(f'\nUsing {num_workers} GPUs for parallel evaluation\n')
+    else:
+        num_workers = psutil.cpu_count(logical=False) if args['threads'] == -1 else args['threads']
+        print(f'\nNo GPUs found. Falling back to {num_workers} CPU cores\n')
+    
+    # Optimisation loop with GPU parallelization
     fitness = fitnessRL
-    with EvalParallel2(fitness, number_of_processes=num_cores ) as eval_all:
+    with GPUEvalParallel(fitness, num_workers=num_workers) as eval_all:
         while not es.stop() or gen < args['generations']:
             
             try:
                 # Generate candidate solutions
                 X = es.ask()                          
                 
-                # Evaluate in parallel
+                # Evaluate in parallel using GPUs
                 fitvals = eval_all(X, args=args_fit)
                 
                 # Inform CMA optimizer of fitness results
@@ -248,79 +307,54 @@ def train(args):
 
             except KeyboardInterrupt: # Only works with python mp
                 print('\n'+20*'*')
-                print(f'\nCaught Ctrl+C!\nStopping evolution\n')
+                print('TERMINATING MAIN LOOP ON USER REQUEST')
                 print(20*'*'+'\n')
                 break
-            
-            # Early stopping of evolution
-            environment = args['environment'][0] if isinstance(args['environment'], list) else args['environment']
-            if ( ('Lander' in environment ) and (gen == 1000 and solution_current_best > 0) ) or ( ('Ant' in environment ) and (gen == 1000 and solution_current_best > -500) ):
-                print(f'\nReward too low {solution_current_best} at generation {gen}.\n\nUnpromising run! Stopping evolution.\n')
-                print(20*'*'+'\n')
-                break
-            
-                
-                
-    rewards_mean = np.array(rewards_mean)
-    rewards_best = np.array(rewards_best)
-    # solution = es.result # unsed since ask&tell
-                
-    toc = time.time()
-    nca_config['training time'] = str(int(toc-tic)) + ' seconds'
-    nca_config['seed_size'] = seed_size
-    nca_config['policies_sizes'] = policies_sizes
-    nca_config['bits_per_seed'] = bits_per_seed
-    print('\nEvolution took: ', int(toc-tic), ' seconds\n')
-    print(f'Best single reward found was {-solution_best_reward}\n')
-    print(f'Best mean reward found was {-solution_mean_reward}\n')
 
-    # Save path
-    id_ = str(int(time.time()))
-    plastic = '_PLASTIC' if args['plastic'] else ''
-    
-    # Save solutions
-    if args['save_model']:
-        path = 'saved_models' + '/' + id_ 
-        
-        pathlib.Path(path).mkdir(parents=True, exist_ok=False)
-
-        # Save best and best mean solution
-        np.save(path + '/' + str(args['environment']) + plastic + "_pop_" + str(args['popsize']) + "__rew_" + str(int(-solution_best_reward)) + '_bestsolution', solution_best)
-        np.save(path + '/' + str(args['environment']) + plastic + "_pop_" + str(args['popsize']) + '_meansolution', solution_mean)
-        # Save config file
-        pickle.dump( nca_config, open( "saved_models" + "/"+ id_ + '/nca.config', "wb" ) )
-        # Save rewards
-        np.save(path + '/' + 'rewards_mean', rewards_mean)
-        np.save(path + '/' + 'rewards_best', rewards_best)
-        
-        # Save reward plot
-        plots_rewads_save(id_, rewards_mean, rewards_best)
-            
-        with open(path + '/nca.config', "wb" ) as outfile:
-            pickle.dump( nca_config, outfile )    
-        with open(path + '/nca_config.yml', 'w') as outfile: # For quickly see the parameters
-            del nca_config['seeds']
-            nca_config['date'] = datetime.date.today()
-            nca_config['id'] = id_
-            yaml.dump(nca_config, outfile, default_flow_style=False)
-            
-    if args['save_model'] and args['generations'] > 10:
         es.result_pretty()
-        print(f'\nid_: {id_}\n')
-        for key, value in nca_config.items():
-            if key != 'seeds':
-                print(key,':',value)
-    
-    # Log final results to wandb
-    if args['use_wandb']:
-        wandb.log({
-            "final_best_reward": -solution_best_reward,
-            "final_mean_reward": -solution_mean_reward,
-            "training_time_seconds": int(toc-tic)
-        })
-        wandb.finish()
-    
-    return rewards_best, rewards_mean
+        toc = time.time()
+        print('Time elapsed in optimization:', toc-tic)    
+        print('Time per generation', (toc-tic)/gen)
+        
+        solution_best = es.best.x
+        
+        if args['save_model']:
+            
+            today = datetime.datetime.now()
+            d1 = today.strftime('%Y_%m_%d')
+            d2 = today.strftime('%H%M')
+            if not os.path.exists('saved_models/'): 
+                os.makedirs('saved_models/')
+            
+            file_name = f"saved_models/{d1}_{args['environment'][0]}_{d2}.pkl"
+            save_dict = {'solution': solution_best, 'config': nca_config}
+            
+            # Plot
+            plots_rewads_save(rewards_best, rewards_mean, file_name[:-4])
+            
+            env_for_test = gym.make(args['environment'][0])
+            in_dim, out_dim, pixel = dimensions_env(args['environment'][0]) 
+            
+            with open(file_name, 'wb') as outp:
+                pickle.dump(save_dict, outp, pickle.HIGHEST_PROTOCOL)
+            print('Saved RL evo results to', file_name)    
+            
+            input("Press [enter] to continue.")
+        
+        # Visualise best solution
+        with torch.no_grad():
+            
+            # Set flag for simulation render
+            nca_config['render'] = True
+                
+            # Check the fitness of the best solution and record it
+            r = -fitnessRL(solution_best, nca_config, render=True, visualise_weights=False, visualise_network=False)
+            print('Final best individual reward', r)
+        
+        if args['use_wandb']:
+            wandb.finish()
+            
+        return r
 
 def wandb_sweep():
     """

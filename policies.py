@@ -21,9 +21,18 @@ def make_sequental_mlp(input_space, action_space, hidden_dim, bias, layers):
 
 class MLPn(nn.Module):        
     
-    def __init__(self, input_space, action_space, hidden_dim, bias, layers):
+    def __init__(self, input_space, action_space, hidden_dim, bias, layers, device=None):
         super(MLPn, self).__init__()
+        # Use specified device or auto-detect
+        self.device = device if device is not None else torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.out = make_sequental_mlp(input_space, action_space, hidden_dim, bias, layers)
+        # Move the model to the device
+        self.to(self.device)
 
     def forward(self, x):
+        # Ensure input is on the correct device
+        if isinstance(x, torch.Tensor):
+            x = x.to(self.device)
+        else:
+            x = torch.tensor(x, device=self.device, dtype=torch.float64)
         return self.out(x)

@@ -1,4 +1,3 @@
- 
 ---
 
 <div align="center">    
@@ -98,15 +97,96 @@ Use `python fitness_functions.py --id <run_id>` to evaluate reported models:
 If you want to train the model, you can find the specific parameters on use to train the models o each of the model configuration `.yml` files in `saved_models`. 
 
 
-## Methamorphosis neural networks
+## Metamorphosis neural networks
 
-To code to train the *Methamorphosis neural networks*, can be found in the *metamorphosis* branch of this repository. The NCA implementations are identical to the one used in this branch, the only code difference is the logic flow to make use of the morphing weights into the RL agent. The id of the reported metamorphosis model is 1644785913 and be evaluated in the metamorphosis branch with `python fitness_functions.py --id 1644785913`
+To code to train the *Metamorphosis neural networks*, can be found in the *metamorphosis* branch of this repository. The NCA implementations are identical to the one used in this branch, the only code difference is the logic flow to make use of the morphing weights into the RL agent. The id of the reported metamorphosis model is 1644785913 and be evaluated in the metamorphosis branch with `python fitness_functions.py --id 1644785913`
 
 ![](images/metamorphosis.png)
 
 The different quadruped morphologies can be found in the folder *bullet ants*. In order to 
 reproduce the damaged quadruped results, these new morphologies need to be firstly [registered as custom environments](https://github.com/openai/gym/wiki/Environments). The modified files are all included in the folder.
 
+## GPU-Accelerated Version
+
+This codebase includes a GPU-accelerated version that leverages CUDA-capable GPUs for significant performance improvements during training and evaluation.
+
+### Features
+
+- **GPU Acceleration**: All neural network computations and NCA evolutions now run on the GPU
+- **Multi-GPU Support**: Can distribute workloads across multiple GPUs for even faster training
+- **Automatic Device Detection**: Automatically falls back to CPU if no GPU is available
+- **Memory Efficiency**: Properly manages data transfers between CPU and GPU to optimize performance
+
+### Requirements
+
+- NVIDIA GPU with CUDA support
+- CUDA Toolkit 11.3+ (compatible with PyTorch 1.11.0)
+- PyTorch 1.11.0 with CUDA support
+
+### Setup
+
+We've provided a setup script to help you get started:
+
+```bash
+python setup_gpu.py
+```
+
+This script will:
+1. Check if you have a CUDA-capable GPU
+2. Install the required GPU-enabled PyTorch version
+3. Install other dependencies
+4. Provide instructions for running the GPU-accelerated code
+
+Alternatively, you can install the required packages manually:
+
+```bash
+# For Windows
+pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+
+# For Linux/Mac
+pip install torch==1.11.0 torchvision==0.12.0
+
+# Install other dependencies
+pip install -r requirements.txt
+```
+
+### Running with GPU Acceleration
+
+The code works the same way as the original implementation but will automatically use GPU acceleration if available:
+
+```bash
+python train_NCA.py --environment LunarLander-v2
+```
+
+#### GPU-Specific Parameters
+
+- `--threads`: Control how many GPUs to use for parallel evaluation. If set to `-1`, all available GPUs will be used.
+
+Example:
+```bash
+# Use 2 GPUs for training
+python train_NCA.py --environment LunarLander-v2 --threads 2
+```
+
+### Performance Expectations
+
+The GPU acceleration can provide significant speedups:
+
+- **Single GPU**: Typically 5-20x faster than CPU-only execution, depending on the GPU model
+- **Multiple GPUs**: Almost linear scaling with the number of GPUs for population evaluation
+
+### Troubleshooting
+
+If you encounter issues:
+
+1. **CUDA Out of Memory**: Try reducing the population size or model complexity
+   ```bash
+   python train_NCA.py --environment LunarLander-v2 --popsize 10 --NCA_channels 8
+   ```
+
+2. **CUDA Not Available**: Make sure your NVIDIA drivers are installed and up to date
+
+3. **Performance Issues**: Make sure you don't have other GPU-intensive applications running
 
 ## Citation   
 

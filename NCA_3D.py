@@ -57,7 +57,7 @@ def make_sequental_3d(in_channels, out_channels, bias):
 
 class SmallerCellUpdateNet(torch.nn.Module):        
     """
-    Cells’ update rule: each cell applies a series of operations to the perception vector (same rule for all the cell)
+    Cells' update rule: each cell applies a series of operations to the perception vector (same rule for all the cell)
     """
     def __init__(self, in_channels, out_channels, bias):
         super(SmallerCellUpdateNet, self).__init__()
@@ -89,7 +89,7 @@ class CellCAModel3D(TorchModule):
 
     def __init__(self, config):
         super(CellCAModel3D, self).__init__(config)
-        self.device = self.config.get('device')
+        self.device = self.config.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
         self.num_channels =  self.config.get('NCA_channels')
         self.bias = self.config.get('NCA_bias') 
         self.update_net_channel_dims = [self.config.get('update_net_channel_dims'), self.config.get('update_net_channel_dims') ]
@@ -109,18 +109,23 @@ class CellCAModel3D(TorchModule):
         self.replace = self.config.get('replace')
         self.debugging = self.config.get('debugging')
         self.tanh = torch.nn.Tanh()
-
-            
+        
+        # Move all networks to the device
+        self.perception_net.to(self.device)
+        self.update_network.to(self.device)
+        self.to(self.device)
 
     def alive(self, x):  # return maxpool over the alive channel (1,1,:,:), used to zero-out cells who have no surrounding cell with alive channel above alive thereshold
         return F.max_pool3d(x[:, self.living_channel_dim, :, :, :], kernel_size=3, stride=1, padding=1)
     
-
     def perceive(self, x):
         return self.perception_net(x)
 
     def update(self, x):
-        alive_thresdhold =  self.alpha_living_threshold * self.alive(x).max()
+        # Ensure x is on the correct device
+        x = x.to(self.device)
+        
+        alive_thresdhold = self.alpha_living_threshold * self.alive(x).max()
         if torch.isnan(alive_thresdhold): alive_thresdhold = -np.inf
         pre_life_mask = self.alive(x) > alive_thresdhold
 
@@ -149,8 +154,7 @@ class CellCAModel3D(TorchModule):
         if x.max() > 100000:
             raise ValueError('NCA states are exploding')
         
-        
-        alive_thresdhold =  self.alpha_living_threshold * self.alive(x).max()
+        alive_thresdhold = self.alpha_living_threshold * self.alive(x).max()
         if torch.isnan(alive_thresdhold): alive_thresdhold = -np.inf
         post_life_mask = self.alive(x) > alive_thresdhold
         
@@ -165,6 +169,9 @@ class CellCAModel3D(TorchModule):
         return x, life_mask
 
     def forward(self, x, steps, reading_channel, policy_layers, run_pca=False, visualise_weights=False, visualise_network=False, inOutdim=None):
+        # Ensure x is on the correct device
+        x = x.to(self.device)
+        
         if visualise_weights:
             from celluloid import Camera
             fig2, ax2 = pyplot.subplots(policy_layers)
@@ -182,16 +189,22 @@ class CellCAModel3D(TorchModule):
         weights_for_pca = [] if run_pca else None
         for step in range(steps):
             if visualise_network:   # Only generate network visualation at a time
-                cameraNetwork = visualiseNetwork(x[0][reading_channel], inOutdim, cameraNetwork, animated=True)
+                # Need to move tensor to CPU for visualization
+                x_cpu = x.cpu() if x.is_cuda else x
+                cameraNetwork = visualiseNetwork(x_cpu[0][reading_channel], inOutdim, cameraNetwork, animated=True)
             elif visualise_weights:  # Only generate voxel visualation at a time
                 x_ = x.clone()
-                camera_layers = visualiseVoxs2Dmulti(x, camera_layers, fig2, ax2, step, None)
+                # Need to move tensor to CPU for visualization
+                x_cpu = x.cpu() if x.is_cuda else x
+                camera_layers = visualiseVoxs2Dmulti(x_cpu, camera_layers, fig2, ax2, step, None)
             
             x, life_mask = self.update(x)
             x[:,:,-1,inOutdim[1]:,:] = 0.0 
             
             if run_pca:
-                weights_for_pca.append(x[0][reading_channel].flatten().detach().numpy())
+                # Move to CPU for numpy conversion
+                x_cpu = x.cpu() if x.is_cuda else x
+                weights_for_pca.append(x_cpu[0][reading_channel].flatten().detach().numpy())
                 
             # # Delta
             # if visualise_weights:
