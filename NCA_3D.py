@@ -85,6 +85,8 @@ class CellCAModel3D(TorchModule):
     DEFAULT_CONFIG = {
         "perception_net_class":CellPerceptionNet,
         "update_net_class":SmallerCellUpdateNet,
+        "noise_std": 0.0,     # Gaussian noise standard deviation
+        "dropout_rate": 0.0,  # Cell dropout probability
     }
 
     def __init__(self, config):
@@ -109,6 +111,8 @@ class CellCAModel3D(TorchModule):
         self.replace = self.config.get('replace')
         self.debugging = self.config.get('debugging')
         self.tanh = torch.nn.Tanh()
+        self.noise_std = self.config.get("noise_std",0)
+        self.dropout_rate = self.config.get("dropout_rate",0)
 
             
 
@@ -125,8 +129,19 @@ class CellCAModel3D(TorchModule):
         pre_life_mask = self.alive(x) > alive_thresdhold
 
         out = self.perceive(x)
-        out = self.update_network(out)
-        
+
+        if self.noise_std > 0:
+            noise = torch.randn_like(out) * self.noise_std
+            out = out + noise
+
+        out = self.update_network(out) 
+
+        if self.dropout_rate>0:
+            living_cells = (self.alive(x) > 0).double().unsqueeze(1)
+            dropout_mask = (torch.rand_like(x[:, :1]) > self.dropout_rate).double()
+            final_mask = dropout_mask * living_cells
+            out = out * final_mask
+
         if self.debugging:
             for layer in list(self.perception_net.parameters()):
                 print(f"perception_net layer weight max: {layer.max()}, min: {layer.min()}")

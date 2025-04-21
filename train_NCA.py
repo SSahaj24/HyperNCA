@@ -11,6 +11,7 @@ import yaml
 import datetime
 import gym
 import wandb
+import os
 
 from fitness_functions import fitnessRL
 from policies import MLPn
@@ -22,6 +23,25 @@ from cma.optimization_tools import EvalParallel2
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 torch.set_default_dtype(torch.float64)
+
+def load_config_from_saved_model(model_id):
+    """
+    Load configuration from a saved model using its ID.
+    
+    Args:
+        model_id (str): The ID of the saved model
+        
+    Returns:
+        dict: The configuration dictionary
+    """
+    config_path = os.path.join("saved_models", model_id, "nca.config")
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found at {config_path}")
+    
+    with open(config_path, "rb") as f:
+        config = pickle.load(f)
+    
+    return config
 
 def x0_sampling(dist, nb_params):
     if dist == 'U[0,1]':
@@ -55,7 +75,9 @@ def train(args):
                 "plastic": args['plastic'],
                 "normalize": args['normalise'],
                 "NCA_bias": args['NCA_bias'],
-                "neighborhood": args['neighborhood']
+                "neighborhood": args['neighborhood'],
+                "noise_std": args['noise_std'],
+                "dropout_rate": args['dropout_rate']
             }
         )
     
@@ -132,6 +154,8 @@ def train(args):
         
     # NCA config
     nca_config = {
+        "noise_std": args['noise_std'],     # Adjust noise level
+        "dropout_rate": args['dropout_rate'], # Adjust dropout probability
         "environment" : args['environment'],
         "popsize" : args['popsize'],
         "generations" : args['generations'],
@@ -322,10 +346,18 @@ def train(args):
     
     return rewards_best, rewards_mean
 
-def wandb_sweep():
+def wandb_sweep(model_id="1645447353", trial_count=20):
     """
-    Run a sweep with wandb to optimize hyperparameters.
+    Run a sweep with wandb to optimize hyperparameters based on a saved model config.
+    
+    Args:
+        model_id (str): The ID of the saved model to use as base config
+        trial_count (int): Number of trials to run in the sweep
     """
+    # Load configuration from saved model
+    saved_config = load_config_from_saved_model(model_id)
+    
+    # Set up sweep configuration focusing on noise_std and dropout_rate
     sweep_config = {
         'method': 'bayes',  # Bayesian optimization
         'metric': {
@@ -333,69 +365,64 @@ def wandb_sweep():
             'goal': 'maximize'
         },
         'parameters': {
-            'popsize': {
-                'values': [32, 64, 128, 256]
+            'noise_std': {
+                'min': 0.0,
+                'max': 0.25
             },
-            'NCA_steps': {
-                'min': 10,
-                'max': 50
-            },
-            'NCA_dimension': {
-                'value': 3  # Fixed to 3D
-            },
-            'policy_layers': {
-                'values': [2, 3, 4, 5]
-            },
-            'living_threshold': {
+            'dropout_rate': {
                 'min': 0.0,
                 'max': 0.5
             }
         }
     }
     
-    sweep_id = wandb.sweep(sweep_config, project="nca-rl-hyperparameter-sweep")
+    sweep_id = wandb.sweep(sweep_config, project="noise_dropout_sweep")
     
     def sweep_train():
         wandb.init()
         
         # Get hyperparameters from wandb
-        config = wandb.config
+        wandb_config = wandb.config
         
-        # Create args dictionary with default values and update with wandb config
+        # Create args dictionary with values from saved config
         args = {
-            'environment': ['LunarLander-v2'],
-            'generations': 250,  # Hardcoded to 250
-            'popsize': config.popsize,
+            'environment': saved_config.get('environment', ['LunarLander-v2']),
+            'generations': saved_config.get('generations', 1500),
+            'popsize': saved_config.get('popsize', 64),
             'print_every': 10,
             'x0_dist': 'U[-1,1]',
-            'sigma_init': 0.1,
+            'sigma_init': saved_config.get('sigma_init', 0.1),
             'threads': 8,
-            'seed_type': 'randomU2',
-            'NCA_steps': config.NCA_steps,
-            'NCA_dimension': config.NCA_dimension,
-            'size_substrate': 0,
-            'NCA_channels': 2,
-            'reading_channel': 0,
-            'update_net_channel_dims': 4,
-            'living_threshold': config.living_threshold,
-            'policy_layers': config.policy_layers,
-            'NCA_bias': False,
-            'neighborhood': 'Moore',
+            'seed_type': saved_config.get('seed_type', ['randomU2'])[0],
+            'NCA_steps': saved_config.get('NCA_steps', 20),
+            'NCA_dimension': saved_config.get('NCA_dimension', 3),
+            'size_substrate': saved_config.get('size_substrate', 0),
+            'NCA_channels': saved_config.get('NCA_channels', 2),
+            'reading_channel': saved_config.get('reading_channel', 0),
+            'update_net_channel_dims': saved_config.get('update_net_channel_dims', 4),
+            'living_threshold': saved_config.get('alpha_living_threshold', 0),
+            'policy_layers': saved_config.get('policy_layers', 4),
+            'NCA_bias': saved_config.get('NCA_bias', False),
+            'neighborhood': saved_config.get('neighborhood', 'Moore'),
             'save_model': True,
-            'random_seed': False,
-            'random_seed_env': True,
-            'normalise': True,
-            'replace': False,
-            'co_evolve_seed': False,
-            'plastic': False,
+            'random_seed': saved_config.get('random_seed', False),
+            'random_seed_env': saved_config.get('random_seed_env', True),
+            'normalise': saved_config.get('normalise', True),
+            'replace': saved_config.get('replace', False),
+            'co_evolve_seed': saved_config.get('co_evolve_seed', False),
+            'plastic': saved_config.get('plastic', False),
             'use_wandb': True,
-            'wandb_log_interval': 10
+            'wandb_log_interval': 10,
+            
+            # Use the swept hyperparameters
+            'noise_std': wandb_config.noise_std,
+            'dropout_rate': wandb_config.dropout_rate
         }
         
         train(args)
     
     # Run the sweep
-    wandb.agent(sweep_id, sweep_train, count=30)  # Run 30 trials
+    wandb.agent(sweep_id, sweep_train, count=trial_count)  # Run the specified number of trials
 
 if __name__ == "__main__":
     
@@ -420,6 +447,8 @@ if __name__ == "__main__":
     parser.add_argument('--policy_layers', type=int,  default=4, metavar='', help='Number of layers of the policy.')
     parser.add_argument('--NCA_bias', type=bool,  default=False, metavar='', help='Whether the NCA has bias')
     parser.add_argument('--neighborhood', type=str,  default='Moore', metavar='', help='Neighborhood definition: Whether to use "Von Neumann" neighborhood (4+1) or "Moore" (8+1), both with Manhattan and Chebyshev distance respectively of 1.')
+    parser.add_argument('--noise_std', type=float, default=0.02, metavar='', help='Gaussian noise standard deviation applied during NCA updates')
+    parser.add_argument('--dropout_rate', type=float, default=0.05, metavar='', help='Cell dropout probability during NCA updates')
     
     parser.add_argument('--save_model', default=True, action=argparse.BooleanOptionalAction, help='If called, it will not save the resulting model')
     parser.add_argument('--random_seed', default=False, action=argparse.BooleanOptionalAction, help='If true and seed is type random, the NCA uses a random seed at each episode')
@@ -433,10 +462,12 @@ if __name__ == "__main__":
     parser.add_argument('--use_wandb', default=False, action=argparse.BooleanOptionalAction, help='Use Weights & Biases for experiment tracking')
     parser.add_argument('--wandb_log_interval', type=int, default=10, metavar='', help='Log to wandb every N generations')
     parser.add_argument('--run_sweep', default=False, action=argparse.BooleanOptionalAction, help='Run a wandb sweep for hyperparameter optimization')
+    parser.add_argument('--model_id', type=str, default="1645447353", metavar='', help='ID of the saved model to use as base configuration for sweep')
+    parser.add_argument('--trial_count', type=int, default=20, metavar='', help='Number of trials to run in the sweep')
     
     args = parser.parse_args()
     
     if args.run_sweep:
-        wandb_sweep()
+        wandb_sweep(args.model_id, args.trial_count)
     else:
         train(vars(args))
