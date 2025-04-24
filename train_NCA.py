@@ -367,11 +367,11 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
         'parameters': {
             'noise_std': {
                 'min': 0.0,
-                'max': 0.25
+                'max': 0.4
             },
             'dropout_rate': {
                 'min': 0.0,
-                'max': 0.5
+                'max': 0.4
             }
         }
     }
@@ -387,7 +387,7 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
         # Create args dictionary with values from saved config
         args = {
             'environment': saved_config.get('environment', ['LunarLander-v2']),
-            'generations': saved_config.get('generations', 1500),
+            'generations': 2000,
             'popsize': saved_config.get('popsize', 64),
             'print_every': 10,
             'x0_dist': 'U[-1,1]',
@@ -429,7 +429,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--environment', type=str, default=['LunarLander-v2'], nargs='+', metavar='', help='Environment: any state-vector OpenAI Gym or pyBullet environment may be used')
     # parser.add_argument('--environment', type=str, default=['AntBulletEnv-v0'] , nargs='+', metavar='', help='Environments: any OpenAI Gym or pyBullet environment may be used')
-    parser.add_argument('--generations', type=int, default=10000, metavar='', help='Number of generations that the ES will run.')
+    parser.add_argument('--generations', type=int, default=20, metavar='', help='Number of generations that the ES will run.')
     parser.add_argument('--popsize', type=int,  default=64, metavar='', help='Population size.')
     parser.add_argument('--print_every', type=int, default=10, metavar='', help='Print every N steps.') 
     parser.add_argument('--x0_dist', type=str, default='U[-1,1]', metavar='', help='Distribution used to sample intial value for CMA-ES') 
