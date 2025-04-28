@@ -87,6 +87,7 @@ class CellCAModel3D(TorchModule):
         "update_net_class":SmallerCellUpdateNet,
         "noise_std": 0.0,     # Gaussian noise standard deviation
         "dropout_rate": 0.0,  # Cell dropout probability
+        "network_dropout_rate": 0.0, # Network dropout probability
     }
 
     def __init__(self, config):
@@ -113,6 +114,7 @@ class CellCAModel3D(TorchModule):
         self.tanh = torch.nn.Tanh()
         self.noise_std = self.config.get("noise_std",0)
         self.dropout_rate = self.config.get("dropout_rate",0)
+        self.network_dropout_rate = self.config.get("network_dropout_rate",0)
 
             
 
@@ -205,8 +207,9 @@ class CellCAModel3D(TorchModule):
                 x_ = x.clone()
                 camera_layers = visualiseVoxs2Dmulti(x, camera_layers, fig2, ax2, step, None)
             
-            x, life_mask = self.update(x, training=training)
+            x, life_mask = self.update(x)
             x[:,:,-1,inOutdim[1]:,:] = 0.0 
+
             
             if run_pca:
                 weights_for_pca.append(x[0][reading_channel].flatten().detach().numpy())
@@ -214,6 +217,15 @@ class CellCAModel3D(TorchModule):
             # # Delta
             # if visualise_weights:
             #     camera_layers_delta = visualiseVoxs2Dmulti(abs(x-x_), camera_layers_delta, fig3, ax3, step, 'gray')
+
+        if self.network_dropout_rate>0:
+                living_cells = (self.alive(x) > 0).double().unsqueeze(1)
+                if training:
+                    dropout_mask = (torch.rand_like(x[:, :1]) > self.network_dropout_rate).double()
+                else:
+                    dropout_mask = (1 - self.network_dropout_rate) * torch.ones_like(x[:, :1])
+                final_mask = dropout_mask * living_cells
+                x = x * final_mask
 
         if visualise_weights:
             id_ = str(int(time.time()))
