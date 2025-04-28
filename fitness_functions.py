@@ -283,7 +283,8 @@ def evaluate(argv):
         raise ValueError('Can not visualise both weight matrix and network at the same time')
     
     # Load NCA config
-    nca_config = pickle.load( open( 'saved_models/' + args.id + '/nca.config', "rb" ) )   
+    nca_config = pickle.load( open( 'saved_models/' + args.id + '/nca.config', "rb" ) )
+    print(nca_config['plastic'])
     
     for key, value in nca_config.items():
         if key != 'seeds':

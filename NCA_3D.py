@@ -142,9 +142,9 @@ class CellCAModel3D(TorchModule):
             living_cells = (self.alive(x) > 0).double().unsqueeze(1)
             if training:
                 dropout_mask = (torch.rand_like(x[:, :1]) > self.dropout_rate).double()
-            else:
-                dropout_mask = (1 - self.dropout_rate) * torch.ones_like(x[:, :1])
-            final_mask = dropout_mask * living_cells
+                scale_mask = (1.0/(1 - self.dropout_rate)) * torch.ones_like(x[:, :1])
+            post_dropout_mask = dropout_mask * living_cells
+            final_mask = post_dropout_mask * scale_mask
             out = out * final_mask
 
         if self.debugging:
@@ -222,9 +222,9 @@ class CellCAModel3D(TorchModule):
                 living_cells = (self.alive(x) > 0).double().unsqueeze(1)
                 if training:
                     dropout_mask = (torch.rand_like(x[:, :1]) > self.network_dropout_rate).double()
-                else:
-                    dropout_mask = (1 - self.network_dropout_rate) * torch.ones_like(x[:, :1])
-                final_mask = dropout_mask * living_cells
+                    scale_mask = (1.0/(1 - self.network_dropout_rate)) * torch.ones_like(x[:, :1])
+                post_dropout_mask = dropout_mask * living_cells
+                final_mask = post_dropout_mask * scale_mask
                 x = x * final_mask
 
         if visualise_weights:
