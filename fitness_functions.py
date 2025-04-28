@@ -21,7 +21,7 @@ torch.set_default_dtype(torch.float64)
 
 
 
-def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, visualise_weights=False, visualise_network = False): 
+def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, visualise_weights=False, visualise_network = False, training=True): 
     """
     Returns the NEGATIVE episodic fitness of the agents.
     """
@@ -132,7 +132,7 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                     if nca_config['NCA_MLP']:
                         raise NotImplementedError
                     else:                    
-                        new_pattern, _weights_for_pca_ = ca.forward(seed, steps=nca_config['NCA_steps'], reading_channel=nca_config['reading_channel'], policy_layers = nca_config['policy_layers'], run_pca=False, visualise_weights=visualise_weights, visualise_network=visualise_network, inOutdim=[input_dim,action_dim])
+                        new_pattern, _weights_for_pca_ = ca.forward(seed, steps=nca_config['NCA_steps'], reading_channel=nca_config['reading_channel'], policy_layers = nca_config['policy_layers'], run_pca=False, visualise_weights=visualise_weights, visualise_network=visualise_network, inOutdim=[input_dim,action_dim], training=training)
                         generated_policy_weights = new_pattern.detach()[0]
                         
                     # Load generated weights into policy network 
@@ -302,7 +302,7 @@ def evaluate(argv):
     evals = []
     runs = args.evaluation_runs
     for _ in range(runs):
-        evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network))
+        evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network, training=False))
     evals = np.array(evals)
     print(f'mean reward {np.mean(evals)}. Var: {np.std(evals)}. Shape {evals.shape}')
 

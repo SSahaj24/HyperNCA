@@ -123,7 +123,7 @@ class CellCAModel3D(TorchModule):
     def perceive(self, x):
         return self.perception_net(x)
 
-    def update(self, x):
+    def update(self, x, training=True):
         alive_thresdhold =  self.alpha_living_threshold * self.alive(x).max()
         if torch.isnan(alive_thresdhold): alive_thresdhold = -np.inf
         pre_life_mask = self.alive(x) > alive_thresdhold
@@ -138,7 +138,10 @@ class CellCAModel3D(TorchModule):
 
         if self.dropout_rate>0:
             living_cells = (self.alive(x) > 0).double().unsqueeze(1)
-            dropout_mask = (torch.rand_like(x[:, :1]) > self.dropout_rate).double()
+            if training:
+                dropout_mask = (torch.rand_like(x[:, :1]) > self.dropout_rate).double()
+            else:
+                dropout_mask = (1 - self.dropout_rate) * torch.ones_like(x[:, :1])
             final_mask = dropout_mask * living_cells
             out = out * final_mask
 
@@ -179,7 +182,7 @@ class CellCAModel3D(TorchModule):
         
         return x, life_mask
 
-    def forward(self, x, steps, reading_channel, policy_layers, run_pca=False, visualise_weights=False, visualise_network=False, inOutdim=None):
+    def forward(self, x, steps, reading_channel, policy_layers, run_pca=False, visualise_weights=False, visualise_network=False, inOutdim=None, training=True):
         if visualise_weights:
             from celluloid import Camera
             fig2, ax2 = pyplot.subplots(policy_layers)
@@ -202,7 +205,7 @@ class CellCAModel3D(TorchModule):
                 x_ = x.clone()
                 camera_layers = visualiseVoxs2Dmulti(x, camera_layers, fig2, ax2, step, None)
             
-            x, life_mask = self.update(x)
+            x, life_mask = self.update(x, training=training)
             x[:,:,-1,inOutdim[1]:,:] = 0.0 
             
             if run_pca:

@@ -218,7 +218,7 @@ def train(args):
     print('\n ♪┏(°.°)┛┗(°.°)┓ Starting Evolution ┗(°.°)┛┏(°.°)┓ ♪ \n')
     tic = time.time()
     
-    args_fit = (nca_config,)
+    args_fit = (nca_config,False, False, False, False, True)
     solution_best_reward = np.inf
     solution_mean_reward = np.inf
     rewards_mean = []
@@ -364,19 +364,24 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             'name': 'final_best_reward',
             'goal': 'maximize'
         },
+        # 'parameters': {
+        #     'noise_std': {
+        #         'min': 0.0,
+        #         'max': 0.4
+        #     },
+        #     'dropout_rate': {
+        #         'min': 0.0,
+        #         'max': 0.4
+        #     }
+        # }
         'parameters': {
-            'noise_std': {
-                'min': 0.0,
-                'max': 0.4
-            },
-            'dropout_rate': {
-                'min': 0.0,
-                'max': 0.4
+            'policy_layers': {
+                'values': [i for i in range(1,11)] + [j for j in range(12,30,3)] 
             }
         }
     }
     
-    sweep_id = wandb.sweep(sweep_config, project="noise_dropout_sweep")
+    sweep_id = wandb.sweep(sweep_config, project="network_depth_sweep")
     
     def sweep_train():
         wandb.init()
@@ -387,7 +392,7 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
         # Create args dictionary with values from saved config
         args = {
             'environment': saved_config.get('environment', ['LunarLander-v2']),
-            'generations': 2000,
+            'generations': 3000,
             'popsize': saved_config.get('popsize', 64),
             'print_every': 10,
             'x0_dist': 'U[-1,1]',
@@ -415,8 +420,9 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             'wandb_log_interval': 10,
             
             # Use the swept hyperparameters
-            'noise_std': wandb_config.noise_std,
-            'dropout_rate': wandb_config.dropout_rate
+            'policy_layers': wandb_config.policy_layers,
+            # 'noise_std': wandb_config.noise_std,
+            # 'dropout_rate': wandb_config.dropout_rate
         }
         
         train(args)
@@ -429,7 +435,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--environment', type=str, default=['LunarLander-v2'], nargs='+', metavar='', help='Environment: any state-vector OpenAI Gym or pyBullet environment may be used')
     # parser.add_argument('--environment', type=str, default=['AntBulletEnv-v0'] , nargs='+', metavar='', help='Environments: any OpenAI Gym or pyBullet environment may be used')
-    parser.add_argument('--generations', type=int, default=20, metavar='', help='Number of generations that the ES will run.')
+    parser.add_argument('--generations', type=int, default=10000, metavar='', help='Number of generations that the ES will run.')
     parser.add_argument('--popsize', type=int,  default=64, metavar='', help='Population size.')
     parser.add_argument('--print_every', type=int, default=10, metavar='', help='Print every N steps.') 
     parser.add_argument('--x0_dist', type=str, default='U[-1,1]', metavar='', help='Distribution used to sample intial value for CMA-ES') 
@@ -447,8 +453,8 @@ if __name__ == "__main__":
     parser.add_argument('--policy_layers', type=int,  default=4, metavar='', help='Number of layers of the policy.')
     parser.add_argument('--NCA_bias', type=bool,  default=False, metavar='', help='Whether the NCA has bias')
     parser.add_argument('--neighborhood', type=str,  default='Moore', metavar='', help='Neighborhood definition: Whether to use "Von Neumann" neighborhood (4+1) or "Moore" (8+1), both with Manhattan and Chebyshev distance respectively of 1.')
-    parser.add_argument('--noise_std', type=float, default=0.02, metavar='', help='Gaussian noise standard deviation applied during NCA updates')
-    parser.add_argument('--dropout_rate', type=float, default=0.05, metavar='', help='Cell dropout probability during NCA updates')
+    parser.add_argument('--noise_std', type=float, default=0.00, metavar='', help='Gaussian noise standard deviation applied during NCA updates')
+    parser.add_argument('--dropout_rate', type=float, default=0.00, metavar='', help='Cell dropout probability during NCA updates')
     
     parser.add_argument('--save_model', default=True, action=argparse.BooleanOptionalAction, help='If called, it will not save the resulting model')
     parser.add_argument('--random_seed', default=False, action=argparse.BooleanOptionalAction, help='If true and seed is type random, the NCA uses a random seed at each episode')
