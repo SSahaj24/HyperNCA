@@ -208,8 +208,8 @@ class CellCAModel3D(TorchModule):
                 camera_layers = visualiseVoxs2Dmulti(x, camera_layers, fig2, ax2, step, None)
             
             x, life_mask = self.update(x)
-            x[:,:,-1,inOutdim[1]:,:] = 0.0 
-
+            x[:,:,-1,inOutdim[1]:,:] = 0.0
+            x = torch.clamp(x,-1e6,1e6)
             
             if run_pca:
                 weights_for_pca.append(x[0][reading_channel].flatten().detach().numpy())

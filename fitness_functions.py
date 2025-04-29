@@ -139,9 +139,15 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                     reading_channel = nca_config['reading_channel']
                     for i in range(nca_config['policy_layers']):
                         if i == nca_config['policy_layers'] - 1: # last layer of the policy
-                            p.out[2*i].weight = nn.Parameter(generated_policy_weights[reading_channel][i][:action_dim,:], requires_grad=False) 
+                            layer_weights = generated_policy_weights[reading_channel][i][:action_dim,:]
                         else:
-                            p.out[2*i].weight = nn.Parameter(generated_policy_weights[reading_channel][i], requires_grad=False) 
+                            layer_weights = generated_policy_weights[reading_channel][i]
+                            torch_dropout_rate = nca_config.get('torch_dropout_rate', 0.0)
+                            if training and torch_dropout_rate>0:
+                                dropout_mask = (torch.rand_like(layer_weights) > torch_dropout_rate)
+                                scale = 1.0 / (1.0 - torch_dropout_rate)
+                                layer_weights = layer_weights * dropout_mark.to(layer_weights.device) * scale
+                    p.out[2*i].weight = nn.Parameter(layer_weights, requires_grad=False)
                     
                     if nca_config['NCA_MLP']:
                         

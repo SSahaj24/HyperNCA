@@ -187,6 +187,7 @@ def train(args):
         "seeds_size" : [seeds_flatten[i].shape[0] if args['co_evolve_seed'] else None for i in range(len(seeds_flatten))],
         "nb_envs" : len(environments),
         "policy_layers" : args['policy_layers'],
+        "torch_dropout_rate" : args['torch_dropout_rate']
     }
     
     if nca_config['NCA_dimension'] == 2:
@@ -381,11 +382,14 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             },
             'policy_layers': {
                 'values': [i for i in range(1,11)] + [j for j in range(12,30,3)] 
-        }
+        },
+            'NCA_channels':{
+                'values': [i for i in range(1,10)]
         }
     }
+    }
     
-    sweep_id = wandb.sweep(sweep_config, project="network_depth_sweep")
+    sweep_id = wandb.sweep(sweep_config, project="NCA_channel_sweep")
     
     def sweep_train():
         wandb.init()
@@ -396,17 +400,17 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
         # Create args dictionary with values from saved config
         args = {
             'environment': saved_config.get('environment', ['LunarLander-v2']),
-            'generations': 3000,
+            'generations': 10000,
             'popsize': saved_config.get('popsize', 64),
             'print_every': 10,
             'x0_dist': 'U[-1,1]',
             'sigma_init': saved_config.get('sigma_init', 0.1),
-            'threads': 8,
+            'threads': 16,
             'seed_type': saved_config.get('seed_type', ['randomU2'])[0],
             'NCA_steps': saved_config.get('NCA_steps', 20),
             'NCA_dimension': saved_config.get('NCA_dimension', 3),
             'size_substrate': saved_config.get('size_substrate', 0),
-            'NCA_channels': saved_config.get('NCA_channels', 2),
+            #'NCA_channels': saved_config.get('NCA_channels', 2),
             'reading_channel': saved_config.get('reading_channel', 0),
             'update_net_channel_dims': saved_config.get('update_net_channel_dims', 4),
             'living_threshold': saved_config.get('alpha_living_threshold', 0),
@@ -425,9 +429,11 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             
             # Use the swept hyperparameters
             # 'policy_layers': wandb_config.policy_layers,
-            # 'noise_std': wandb_config.noise_std,
-            # 'dropout_rate': wandb_config.dropout_rate
-            'network_dropout_rate': wandb_config.network_dropout_rate
+            'noise_std': saved_config.get('noise_std', 0), #wandb_.noise_std,
+            'dropout_rate': saved_config.get('dropout_rate', 0), #dropout_rate
+            'network_dropout_rate': saved_config.get('network_dropout_rate',0),
+            'NCA_channels' : wandb_config.NCA_channels,
+        
         }
         
         train(args)
@@ -475,7 +481,8 @@ if __name__ == "__main__":
     parser.add_argument('--run_sweep', default=False, action=argparse.BooleanOptionalAction, help='Run a wandb sweep for hyperparameter optimization')
     parser.add_argument('--model_id', type=str, default="1645447353", metavar='', help='ID of the saved model to use as base configuration for sweep')
     parser.add_argument('--trial_count', type=int, default=20, metavar='', help='Number of trials to run in the sweep')
-    
+    parser.add_argument('--torch_dropout_rate', type=float, default=0.0, metavar='', help='Fraction of weights to dropout in each policy layer')
+
     args = parser.parse_args()
     
     if args.run_sweep:
