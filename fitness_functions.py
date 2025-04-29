@@ -146,8 +146,8 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                             if training and torch_dropout_rate>0:
                                 dropout_mask = (torch.rand_like(layer_weights) > torch_dropout_rate)
                                 scale = 1.0 / (1.0 - torch_dropout_rate)
-                                layer_weights = layer_weights * dropout_mark.to(layer_weights.device) * scale
-                    p.out[2*i].weight = nn.Parameter(layer_weights, requires_grad=False)
+                                layer_weights = layer_weights * dropout_mask.to(layer_weights.device) * scale
+                        p.out[2*i].weight = nn.Parameter(layer_weights, requires_grad=False)
                     
                     if nca_config['NCA_MLP']:
                         
