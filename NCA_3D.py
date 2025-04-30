@@ -23,7 +23,8 @@ def merge_dicts_helper(dict1, dict2):
 
 def merge_dicts(dict1,dict2):
     dict1 = copy.deepcopy(dict1)
-    dict2 = copy.deepcopy(dict2)
+    # dict2 = copy.deepcopy(dict2)
+    dict2 = copy.deepcopy({k:v for k,v in dict2.items() if k not in ['archive', 'lock']})
     return merge_dicts_helper(dict1, dict2)
 
 class ConfigBase:

@@ -20,6 +20,8 @@ from utils_and_wrappers import generate_seeds3D, plots_rewads_save, policy_layer
 
 from cma.optimization_tools import EvalParallel2
 
+import multiprocessing as mp
+
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 torch.set_default_dtype(torch.float64)
@@ -85,10 +87,14 @@ def train(args):
     if args['save_model']: # prevent printing during experiments
         print('\n')
         for key, value in args.items():
-            if key != 'seeds':
+            if key != 'seeds' or key != 'archive' or key != 'lock':
                 print(key,':',value)
         print('\n')
     
+    manager = mp.Manager()
+    archive = manager.list()
+    lock = manager.Lock()
+
     environments = args['environment']
     seeds_type = ['ones', '-ones'] if args['seed_type'] == '-1+1' else len(environments)*[args['seed_type']]
     seeds = [] 
@@ -158,6 +164,7 @@ def train(args):
         "noise_std": args['noise_std'],     # Adjust noise level
         "dropout_rate": args['dropout_rate'], # Adjust dropout probability
         "network_dropout_rate": args['network_dropout_rate'], # Adjust network dropout probability
+        "torch_dropout_rate": args['torch_dropout_rate'],
         "environment" : args['environment'],
         "popsize" : args['popsize'],
         "generations" : args['generations'],
@@ -187,6 +194,8 @@ def train(args):
         "seeds_size" : [seeds_flatten[i].shape[0] if args['co_evolve_seed'] else None for i in range(len(seeds_flatten))],
         "nb_envs" : len(environments),
         "policy_layers" : args['policy_layers'],
+        'novelty_alpha' : args['novelty_alpha'],
+        'novelty_k':args['novelty_k']
     }
     
     if nca_config['NCA_dimension'] == 2:
@@ -220,7 +229,7 @@ def train(args):
     print('\n ♪┏(°.°)┛┗(°.°)┓ Starting Evolution ┗(°.°)┛┏(°.°)┓ ♪ \n')
     tic = time.time()
     
-    args_fit = (nca_config,False, False, False, False, True)
+    args_fit = (nca_config, archive, lock, False, False, False, False, True)
     solution_best_reward = np.inf
     solution_mean_reward = np.inf
     rewards_mean = []
@@ -237,13 +246,17 @@ def train(args):
             
             try:
                 # Generate candidate solutions
-                X = es.ask()                          
+                X = es.ask()        
+                                  
                 
                 # Evaluate in parallel
                 fitvals = eval_all(X, args=args_fit)
+
+                # Process fitvals to extract fitness values (now adjusted in fitnessRL)
+                fitvals_scalar = [fitval for fitval in fitvals]
                 
                 # Inform CMA optimizer of fitness results
-                es.tell(X, fitvals)                    
+                es.tell(X, fitvals_scalar)                    
                 
                 if gen%args['print_every'] == 0:
                     es.disp()
@@ -410,7 +423,6 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             'reading_channel': saved_config.get('reading_channel', 0),
             'update_net_channel_dims': saved_config.get('update_net_channel_dims', 4),
             'living_threshold': saved_config.get('alpha_living_threshold', 0),
-            'policy_layers': saved_config.get('policy_layers', 4),
             'NCA_bias': saved_config.get('NCA_bias', False),
             'neighborhood': saved_config.get('neighborhood', 'Moore'),
             'save_model': True,
@@ -424,10 +436,14 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             'wandb_log_interval': 10,
             
             # Use the swept hyperparameters
+            'policy_layers': saved_config.get('policy_layers', 4),
             # 'policy_layers': wandb_config.policy_layers,
+            'noise_std': saved_config.get('noise_std', 0.00),
             # 'noise_std': wandb_config.noise_std,
+            'dropout_rate': saved_config.get('dropout_rate', 0.00),
             # 'dropout_rate': wandb_config.dropout_rate
-            'network_dropout_rate': wandb_config.network_dropout_rate
+            'network_dropout_rate': saved_config.get('network_dropout_rate', 0.00),
+            # 'network_dropout_rate': wandb_config.network_dropout_rate
         }
         
         train(args)
@@ -475,6 +491,9 @@ if __name__ == "__main__":
     parser.add_argument('--run_sweep', default=False, action=argparse.BooleanOptionalAction, help='Run a wandb sweep for hyperparameter optimization')
     parser.add_argument('--model_id', type=str, default="1645447353", metavar='', help='ID of the saved model to use as base configuration for sweep')
     parser.add_argument('--trial_count', type=int, default=20, metavar='', help='Number of trials to run in the sweep')
+    parser.add_argument('--novelty_alpha', type=float, default=0.01, metavar='', help='Novelty alpha')
+    parser.add_argument('--novelty_k', type=int, default=15, metavar='', help='Novelty k')
+    parser.add_argument('--torch_dropout_rate', type=float, default=0.00, metavar='', help='Fraction of weights to dropout in each policy layer (except output)')
     
     args = parser.parse_args()
     

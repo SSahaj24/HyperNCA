@@ -8,6 +8,7 @@ import torch.nn as nn
 import pickle
 import os
 import time
+import multiprocessing as mp
 
 from policies import MLPn
 from utils_and_wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
@@ -21,14 +22,18 @@ torch.set_default_dtype(torch.float64)
 
 
 
-def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, visualise_weights=False, visualise_network = False, training=True): 
+def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debugging=False, visualise_weights=False, visualise_network = False, training=True): 
     """
     Returns the NEGATIVE episodic fitness of the agents.
     """
 
+    novelty_alpha = nca_config['novelty_alpha']
+    novelty_k = nca_config['novelty_k']
+
     with torch.no_grad():
         
         cum_reward = 0
+        patterns = []
         seed_offset = 0
         for i, environment in enumerate(nca_config['environment']):
                         
@@ -134,14 +139,31 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                     else:                    
                         new_pattern, _weights_for_pca_ = ca.forward(seed, steps=nca_config['NCA_steps'], reading_channel=nca_config['reading_channel'], policy_layers = nca_config['policy_layers'], run_pca=False, visualise_weights=visualise_weights, visualise_network=visualise_network, inOutdim=[input_dim,action_dim], training=training)
                         generated_policy_weights = new_pattern.detach()[0]
+                        flattened_pattern = generated_policy_weights.flatten().cpu().numpy()
+                        patterns.append(flattened_pattern)
                         
                     # Load generated weights into policy network 
                     reading_channel = nca_config['reading_channel']
+
                     for i in range(nca_config['policy_layers']):
-                        if i == nca_config['policy_layers'] - 1: # last layer of the policy
-                            p.out[2*i].weight = nn.Parameter(generated_policy_weights[reading_channel][i][:action_dim,:], requires_grad=False) 
+                        if i == nca_config['policy_layers'] - 1:  # Last layer
+                            layer_weights = generated_policy_weights[reading_channel][i][:action_dim, :]
                         else:
-                            p.out[2*i].weight = nn.Parameter(generated_policy_weights[reading_channel][i], requires_grad=False) 
+                            layer_weights = generated_policy_weights[reading_channel][i]
+                            # Apply torch_dropout
+                            torch_dropout_rate = nca_config.get('torch_dropout_rate', 0.0)
+                            if training and torch_dropout_rate > 0:
+                                dropout_mask = (torch.rand_like(layer_weights) > torch_dropout_rate)
+                                scale = 1.0 / (1.0 - torch_dropout_rate)
+                                layer_weights = layer_weights * dropout_mask.to(layer_weights.device) * scale
+                        p.out[2*i].weight = nn.Parameter(layer_weights, requires_grad=False)
+
+
+                    # for i in range(nca_config['policy_layers']):
+                    #     if i == nca_config['policy_layers'] - 1: # last layer of the policy
+                    #         p.out[2*i].weight = nn.Parameter(generated_policy_weights[reading_channel][i][:action_dim,:], requires_grad=False) 
+                    #     else:
+                    #         p.out[2*i].weight = nn.Parameter(generated_policy_weights[reading_channel][i], requires_grad=False) 
                     
                     if nca_config['NCA_MLP']:
                         
@@ -256,7 +278,31 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
     if debugging or render or visualise_weights or visualise_network:
         print(f"\nEpisode cumulative reward {cum_reward}\n")
         
-    return -cum_reward
+    novelty_score = 0.0
+    with lock:
+        current_archive = list(archive)
+        if len(current_archive) > 0 and len(patterns) > 0:
+            total_novelty = 0.0
+            num_patterns = 0
+            for pattern in patterns:
+                distances = [np.linalg.norm(pattern - a) for a in current_archive]
+                distances.sort()
+                k_actual = min(nca_config['novelty_k'], len(distances))
+                if k_actual > 0:
+                    avg_distance = sum(distances[:k_actual]) / k_actual
+                    total_novelty += avg_distance
+                    num_patterns += 1
+            if num_patterns > 0:
+                novelty_score = total_novelty / num_patterns
+        # Add new patterns to archive
+        for pattern in patterns:
+            archive.append(pattern)
+
+    print("Cum Reward : ", cum_reward, "Novelty Score : ", novelty_score, "Weighted Novelty Score : ", novelty_score )
+
+    # Adjust fitness with novelty score       
+    adjusted_fitness = -cum_reward - nca_config['novelty_alpha'] * novelty_score
+    return adjusted_fitness
 
 
 
@@ -303,7 +349,7 @@ def evaluate(argv):
     evals = []
     runs = args.evaluation_runs
     for _ in range(runs):
-        evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network, training=False))
+        evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, archive=[], lock=mp.Manager().Lock(),render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network, training=False))
     evals = np.array(evals)
     print(f'mean reward {np.mean(evals)}. Var: {np.std(evals)}. Shape {evals.shape}')
 
