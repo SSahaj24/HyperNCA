@@ -26,6 +26,8 @@ torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 torch.set_default_dtype(torch.float64)
 
+os.makedirs("archive_snapshots", exist_ok=True)
+
 def load_config_from_saved_model(model_id):
     """
     Load configuration from a saved model using its ID.
@@ -249,17 +251,25 @@ def train(args):
                 X = es.ask()        
                                   
                 
-                # Evaluate in parallel
-                fitvals = eval_all(X, args=args_fit)
+                fitvals_scalar = []
+                novelty_scores = []
 
-                # Process fitvals to extract fitness values (now adjusted in fitnessRL)
-                fitvals_scalar = [fitval for fitval in fitvals]
+                for fitval in eval_all(X, args=args_fit):
+                    if isinstance(fitval, tuple):
+                        fitval_val, novelty = fitval
+                        fitvals_scalar.append(fitval_val)
+                        novelty_scores.append(novelty)
+                    else:
+                        fitvals_scalar.append(fitval)
+                        novelty_scores.append(None)
                 
                 # Inform CMA optimizer of fitness results
                 es.tell(X, fitvals_scalar)                    
                 
                 if gen%args['print_every'] == 0:
                     es.disp()
+                if gen % 100 == 0:
+                    np.save(f"archive_snapshots/archive_gen_{gen}.npy", np.array(list(archive)))
                 
                 solution_current_best = es.best.f
                 rewards_best.append(solution_current_best)
@@ -280,7 +290,9 @@ def train(args):
                         "best_reward": -solution_best_reward,
                         "mean_reward": -solution_mean_reward,
                         "current_best_reward": -solution_current_best,
-                        "current_mean_reward": -solution_current_mean_eval
+                        "current_mean_reward": -solution_current_mean_eval,
+                        "avg_novelty_score": np.mean([n for n in novelty_scores if n is not None]),
+                        "novelty_histogram": wandb.Histogram([n for n in novelty_scores if n is not None])
                     })
 
                 gen += 1
@@ -372,7 +384,7 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
     # Load configuration from saved model
     saved_config = load_config_from_saved_model(model_id)
     
-    # Set up sweep configuration focusing on noise_std and dropout_rate
+    # Set up sweep configuration focusing on novelty_alpha
     sweep_config = {
         'method': 'bayes',  # Bayesian optimization
         'metric': {
@@ -380,25 +392,13 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             'goal': 'maximize'
         },
         'parameters': {
-            'noise_std': {
-                'min': 0.0,
-                'max': 0.4
-            },
-            'dropout_rate': {
-                'min': 0.0,
-                'max': 0.4
-            },
-            'network_dropout_rate': {
-                'min': 0.0,
-                'max': 0.4
-            },
-            'policy_layers': {
-                'values': [i for i in range(1,11)] + [j for j in range(12,30,3)] 
-        }
+            'novelty_alpha': {
+                'values': [0.001, 0.01, 0.1, 1, 10]
+            }
         }
     }
     
-    sweep_id = wandb.sweep(sweep_config, project="network_depth_sweep")
+    sweep_id = wandb.sweep(sweep_config, project="novelty_alpha_sweep")
     
     def sweep_train():
         wandb.init()
@@ -409,7 +409,7 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
         # Create args dictionary with values from saved config
         args = {
             'environment': saved_config.get('environment', ['LunarLander-v2']),
-            'generations': 3000,
+            'generations': 6000,
             'popsize': saved_config.get('popsize', 64),
             'print_every': 10,
             'x0_dist': 'U[-1,1]',
@@ -435,21 +435,22 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             'use_wandb': True,
             'wandb_log_interval': 10,
             
-            # Use the swept hyperparameters
+            # Fixed hyperparameters from saved config
             'policy_layers': saved_config.get('policy_layers', 4),
-            # 'policy_layers': wandb_config.policy_layers,
             'noise_std': saved_config.get('noise_std', 0.00),
-            # 'noise_std': wandb_config.noise_std,
             'dropout_rate': saved_config.get('dropout_rate', 0.00),
-            # 'dropout_rate': wandb_config.dropout_rate
             'network_dropout_rate': saved_config.get('network_dropout_rate', 0.00),
-            # 'network_dropout_rate': wandb_config.network_dropout_rate
+            'torch_dropout_rate': saved_config.get('torch_dropout_rate', 0.00),
+            
+            # Swept hyperparameters
+            'novelty_alpha': wandb_config.novelty_alpha,
+            'novelty_k': 15  # Fixed at a suitable value
         }
         
         train(args)
     
     # Run the sweep
-    wandb.agent(sweep_id, sweep_train, count=trial_count)  # Run the specified number of trials
+    wandb.agent(sweep_id, sweep_train, count=trial_count)
 
 if __name__ == "__main__":
     
