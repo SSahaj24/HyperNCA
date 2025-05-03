@@ -27,8 +27,12 @@ def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debu
     Returns the NEGATIVE episodic fitness of the agents.
     """
 
-    novelty_alpha = nca_config['novelty_alpha']
-    novelty_k = nca_config['novelty_k']
+    try:
+        novelty_alpha = nca_config['novelty_alpha']
+        novelty_k = nca_config['novelty_k']
+    except Exception as e:
+        novelty_alpha = 0
+        novelty_k = 0
 
     with torch.no_grad():
         
@@ -281,13 +285,14 @@ def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debu
     novelty_score = 0.0
     with lock:
         current_archive = list(archive)
+            
         if len(current_archive) > 0 and len(patterns) > 0:
             total_novelty = 0.0
             num_patterns = 0
             for pattern in patterns:
                 distances = [np.linalg.norm(pattern - a) for a in current_archive]
                 distances.sort()
-                k_actual = min(nca_config['novelty_k'], len(distances))
+                k_actual = min(novelty_k, len(distances))
                 if k_actual > 0:
                     avg_distance = sum(distances[:k_actual]) / k_actual
                     total_novelty += avg_distance
@@ -298,11 +303,13 @@ def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debu
         for pattern in patterns:
             archive.append(pattern)
 
-    print("Cum Reward : ", cum_reward, "Novelty Score : ", novelty_score, "Weighted Novelty Score : ", novelty_score )
+    # print("Cum Reward : ", cum_reward, "Novelty Score : ", novelty_score, "Weighted Novelty Score : ", novelty_score )
 
     # Adjust fitness with novelty score       
-    adjusted_fitness = -cum_reward - nca_config['novelty_alpha'] * novelty_score
-    return adjusted_fitness
+    adjusted_fitness = -cum_reward - novelty_alpha * novelty_score
+
+    return adjusted_fitness, novelty_score
+
 
 
 
@@ -349,7 +356,7 @@ def evaluate(argv):
     evals = []
     runs = args.evaluation_runs
     for _ in range(runs):
-        evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, archive=[], lock=mp.Manager().Lock(),render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network, training=False))
+        evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, archive=[], lock=mp.Manager().Lock(),render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network, training=False)[0])
     evals = np.array(evals)
     print(f'mean reward {np.mean(evals)}. Var: {np.std(evals)}. Shape {evals.shape}')
 
