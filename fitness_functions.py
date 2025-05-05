@@ -27,6 +27,12 @@ def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debu
     Returns the NEGATIVE episodic fitness of the agents.
     """
 
+    # Local LSH parameters (not stored in nca_config)
+    L = 5                # Number of hash functions
+    WIDTH = 1.0          # Bucket width
+    LSH_SEED = 42        # Fixed seed for reproducibility
+
+
     try:
         novelty_alpha = nca_config['novelty_alpha']
         novelty_k = nca_config['novelty_k']
@@ -281,27 +287,68 @@ def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debu
         
     if debugging or render or visualise_weights or visualise_network:
         print(f"\nEpisode cumulative reward {cum_reward}\n")
+
+    if len(patterns) > 0:
+        # Generate LSH components
+        pattern_dim = len(patterns[0])
+        np.random.seed(LSH_SEED)
+        hash_fns = [(
+            np.random.randn(pattern_dim),  # Random projection vector
+            np.random.uniform(0, WIDTH)    # Bucket offset
+        ) for _ in range(L)]
+        
+        # Generate hash signatures for new patterns
+        pattern_buckets = []
+        for p in patterns:
+            signature = [str(int(np.floor((np.dot(p, a) + b)/WIDTH))) for a, b in hash_fns]
+            pattern_buckets.append(signature)
         
     novelty_score = 0.0
+    
+    # with lock:
+    #     current_archive = list(archive)
+            
+    #     if len(current_archive) > 0 and len(patterns) > 0:
+    #         total_novelty = 0.0
+    #         num_patterns = 0
+    #         for pattern in patterns:
+    #             distances = [np.linalg.norm(pattern - a) for a in current_archive]
+    #             distances.sort()
+    #             k_actual = min(novelty_k, len(distances))
+    #             if k_actual > 0:
+    #                 avg_distance = sum(distances[:k_actual]) / k_actual
+    #                 total_novelty += avg_distance
+    #                 num_patterns += 1
+    #         if num_patterns > 0:
+    #             novelty_score = total_novelty / num_patterns
+    #     # Add new patterns to archive
+    #     for pattern in patterns:
+    #         archive.append(pattern)
+
     with lock:
         current_archive = list(archive)
-            
-        if len(current_archive) > 0 and len(patterns) > 0:
-            total_novelty = 0.0
-            num_patterns = 0
-            for pattern in patterns:
-                distances = [np.linalg.norm(pattern - a) for a in current_archive]
+        archive_buckets = [entry[1] for entry in current_archive]
+        
+        if current_archive and patterns:
+            total_novelty = 0
+            for p_idx, (pattern, buckets) in enumerate(zip(patterns, pattern_buckets)):
+                # Find candidates using LSH buckets
+                candidates = []
+                for a_idx, (archived_p, archived_buckets) in enumerate(current_archive):
+                    if any(b in archived_buckets for b in buckets):
+                        candidates.append(archived_p)
+                
+                # Calculate distances to candidates
+                distances = [np.linalg.norm(pattern - cand) for cand in candidates]
                 distances.sort()
                 k_actual = min(novelty_k, len(distances))
-                if k_actual > 0:
-                    avg_distance = sum(distances[:k_actual]) / k_actual
-                    total_novelty += avg_distance
-                    num_patterns += 1
-            if num_patterns > 0:
-                novelty_score = total_novelty / num_patterns
-        # Add new patterns to archive
-        for pattern in patterns:
-            archive.append(pattern)
+                total_novelty += sum(distances[:k_actual])/k_actual if k_actual > 0 else 0
+            
+            novelty_score = total_novelty/len(patterns)
+        
+        # Add to archive with buckets
+        for p, b in zip(patterns, pattern_buckets):
+            archive.append((p, b))
 
     # print("Cum Reward : ", cum_reward, "Novelty Score : ", novelty_score, "Weighted Novelty Score : ", novelty_score )
 

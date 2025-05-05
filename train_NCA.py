@@ -186,7 +186,7 @@ def train(args):
         "reading_channel" : args['reading_channel'],
         "size_substrate" : args['size_substrate'],
         "penalty_off_topology" : None,
-        "debugging" : 0,
+        "debugging" : 1,
         "RANDOM_SEED" : np.random.randint(10**5),
         "random_seed_env" :args['random_seed_env'],
         "co_evolve_seed" : args['co_evolve_seed'],
@@ -268,8 +268,8 @@ def train(args):
                 
                 if gen%args['print_every'] == 0:
                     es.disp()
-                if gen % 100 == 0:
-                    np.save(f"archive_snapshots/archive_gen_{gen}.npy", np.array(list(archive)))
+                # if gen % 100 == 0:
+                #     np.save(f"archive_snapshots/archive_gen_{gen}.npy", np.array(list(archive)))
                 
                 solution_current_best = es.best.f
                 rewards_best.append(solution_current_best)
