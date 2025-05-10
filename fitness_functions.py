@@ -9,91 +9,78 @@ import pickle
 import os
 import time
 import multiprocessing as mp
-
 from policies import MLPn
 from utils_and_wrappers import FireEpisodicLifeEnv, ScaledFloatFrame
-
 from utils_and_wrappers import generate_seeds3D, policy_layers_parameters, dimensions_env
 from NCA_3D import CellCAModel3D
-
 
 gym.logger.set_level(40)
 torch.set_default_dtype(torch.float64)
 
-
-
-def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debugging=False, visualise_weights=False, visualise_network = False, training=True): 
-    """
-    Returns the NEGATIVE episodic fitness of the agents.
-    """
-
-    # Local LSH parameters (not stored in nca_config)
+def fitnessRL(evolved_parameters, nca_config, archive, lock, render=False, debugging=False, 
+             visualise_weights=False, visualise_network=False, training=True):
+    """Returns the NEGATIVE episodic fitness of agents using LSH-accelerated novelty calculation"""
+    
+    # Local LSH parameters
     L = 5                # Number of hash functions
     WIDTH = 1.0          # Bucket width
     LSH_SEED = 42        # Fixed seed for reproducibility
 
-
     try:
         novelty_alpha = nca_config['novelty_alpha']
         novelty_k = nca_config['novelty_k']
-    except Exception as e:
+    except KeyError:
         novelty_alpha = 0
         novelty_k = 0
 
     with torch.no_grad():
-        
         cum_reward = 0
         patterns = []
         seed_offset = 0
+        
         for i, environment in enumerate(nca_config['environment']):
-                        
-            # Load environment
+            # Environment setup
             try:
-                env = gym.make(environment, verbose = 0)
-            except:
+                env = gym.make(environment, verbose=0)
+            except Exception as e:
                 env = gym.make(environment)
                 
-            if not nca_config['random_seed_env']: 
+            if not nca_config['random_seed_env']:
                 env.seed(nca_config['RANDOM_SEED'])
             
             if environment[-12:-6] == 'Bullet' and render:
-                    env.render()  # bullet envs
+                env.render()
+            
             mujoco_env = False
-        
-            # For environments with several intra-episode lives -eg. Breakout-
-            try: 
+            if 'AntBullet' in environment:
+                mujoco_env = True
+
+            # Environment wrappers
+            try:
                 if 'FIRE' in env.unwrapped.get_action_meanings():
                     env = FireEpisodicLifeEnv(env)
-            except: 
+            except AttributeError:
                 pass
-            
-            
 
-            # Check if selected env is pixel or state-vector and its dimensions
+            # Get environment dimensions
             input_dim, action_dim, pixel_env = dimensions_env(environment)
-            if pixel_env == True: 
-                env = w.ResizeObservation(env, 32)        # Resize and normilise input   
+            if pixel_env:
+                env = w.ResizeObservation(env, 32)
                 env = ScaledFloatFrame(env)
 
-            if nca_config['NCA_dimension'] == 2:
-                raise NotImplementedError
-            elif nca_config['NCA_dimension'] == 3:
-                p = MLPn(input_space=nca_config['size_substrate'], action_space=action_dim, hidden_dim=nca_config['size_substrate'], bias=False, layers=nca_config['policy_layers']) 
-            
-            for param in p.parameters():
-                param.requires_grad = False
-                
-            
-            # Initilise NCA with config dict
-            if nca_config['NCA_dimension'] == 2:
-                raise NotImplementedError
-            elif nca_config['NCA_dimension'] == 3:
-                if nca_config['NCA_MLP']:
-                    raise NotImplementedError
-                else:
-                    ca = CellCAModel3D(nca_config)            
-            nca_nb_weights = torch.nn.utils.parameters_to_vector(ca.parameters()).shape[0] 
-            
+            # Policy network setup
+            if nca_config['NCA_dimension'] == 3:
+                p = MLPn(nca_config['size_substrate'], action_dim, 
+                        nca_config['size_substrate'], bias=False, 
+                        layers=nca_config['policy_layers'])
+                for param in p.parameters():
+                    param.requires_grad = False
+            else:
+                raise NotImplementedError("Only 3D NCA supported")
+
+            # Initialize NCA
+            ca = CellCAModel3D(nca_config)
+            nca_nb_weights = torch.nn.utils.parameters_to_vector(ca.parameters()).shape[0]
             if render:
                 nca_nb_weights = torch.nn.utils.parameters_to_vector(ca.parameters()).shape[0]
                 seed_size = nca_config['NCA_channels']*nca_config['policy_layers']*nca_config['size_substrate']*nca_config['size_substrate']
@@ -104,237 +91,122 @@ def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debu
                 if nca_config['plastic']: print('Plastic Policy network') 
                 print('.......................................................\n')
             
-            # Load evolved weights into the NCA
-            nn.utils.vector_to_parameters( torch.tensor (evolved_parameters[:nca_nb_weights], dtype=torch.float64 ),  ca.parameters() )
-                
-                
-            observation = env.reset().astype(np.float64)
-            if pixel_env: observation = observation.flatten()
+            nn.utils.vector_to_parameters(torch.tensor(evolved_parameters[:nca_nb_weights], 
+                                      dtype=torch.float64), ca.parameters())
 
-            # Load or generate (if random) seed
-            # Generate random episode seed
+            # Seed handling
+            observation = env.reset().astype(np.float64)
+            if pixel_env:
+                observation = observation.flatten()
+
             if nca_config['random_seed']:
-                if nca_config['NCA_dimension'] == 2:
-                    raise NotImplementedError
-                elif nca_config['NCA_dimension'] == 3:
-                    seed = generate_seeds3D(policy_layers_parameters(p), nca_config['seed_type'][i], nca_config['NCA_channels'], observation, environment)
-            
-            # Load co-evolved seed
+                seed = generate_seeds3D(policy_layers_parameters(p), 
+                                      nca_config['seed_type'][i],
+                                      nca_config['NCA_channels'],
+                                      observation, environment)
             elif nca_config['co_evolve_seed']:
                 sp = nca_config['seeds_shapes'][i]
-                evolved_seed = torch.tensor(evolved_parameters[nca_nb_weights + seed_offset : nca_nb_weights + seed_offset + nca_config['seeds_size'][i]])
-                if nca_config['NCA_dimension'] == 2: 
-                    raise NotImplementedError
-                if nca_config['NCA_dimension'] == 3:
-                    seed = torch.reshape(evolved_seed, sp[0])
-                    
+                evolved_seed = torch.tensor(evolved_parameters[nca_nb_weights + seed_offset:
+                                              nca_nb_weights + seed_offset + nca_config['seeds_size'][i]])
+                seed = torch.reshape(evolved_seed, sp[0])
                 seed_offset += nca_config['seeds_size'][i]
-            
-            # Load fix seed
             else:
                 seed = nca_config['seeds'][i]
+
+            # Generate policy weights
+            new_pattern, _ = ca.forward(seed, steps=nca_config['NCA_steps'],
+                                      reading_channel=nca_config['reading_channel'],
+                                      policy_layers=nca_config['policy_layers'],
+                                      run_pca=False, visualise_weights=visualise_weights,
+                                      visualise_network=visualise_network,
+                                      inOutdim=[input_dim, action_dim], training=training)
             
-            # Generate policy networks with the NCA
-            if not nca_config['plastic']:
-                
-                (a, b, c) = (0, 1, 2) if not pixel_env else (2, 3, 4)
-                
-                if nca_config['NCA_dimension'] == 2:
-                    raise NotImplementedError
-                            
-                elif nca_config['NCA_dimension'] == 3:
-                    
-                    if nca_config['NCA_MLP']:
-                        raise NotImplementedError
-                    else:                    
-                        new_pattern, _weights_for_pca_ = ca.forward(seed, steps=nca_config['NCA_steps'], reading_channel=nca_config['reading_channel'], policy_layers = nca_config['policy_layers'], run_pca=False, visualise_weights=visualise_weights, visualise_network=visualise_network, inOutdim=[input_dim,action_dim], training=training)
-                        generated_policy_weights = new_pattern.detach()[0]
-                        flattened_pattern = generated_policy_weights.flatten().cpu().numpy()
-                        patterns.append(flattened_pattern)
-                        
-                    # Load generated weights into policy network 
-                    reading_channel = nca_config['reading_channel']
+            generated_policy_weights = new_pattern.detach()[0]
+            flattened_pattern = generated_policy_weights.flatten().cpu().numpy()
+            patterns.append(flattened_pattern)
 
-                    for i in range(nca_config['policy_layers']):
-                        if i == nca_config['policy_layers'] - 1:  # Last layer
-                            layer_weights = generated_policy_weights[reading_channel][i][:action_dim, :]
-                        else:
-                            layer_weights = generated_policy_weights[reading_channel][i]
-                            # Apply torch_dropout
-                            torch_dropout_rate = nca_config.get('torch_dropout_rate', 0.0)
-                            if training and torch_dropout_rate > 0:
-                                dropout_mask = (torch.rand_like(layer_weights) > torch_dropout_rate)
-                                scale = 1.0 / (1.0 - torch_dropout_rate)
-                                layer_weights = layer_weights * dropout_mask.to(layer_weights.device) * scale
-                        p.out[2*i].weight = nn.Parameter(layer_weights, requires_grad=False)
+            # Load weights into policy network
+            reading_channel = nca_config['reading_channel']
+            for layer_idx in range(nca_config['policy_layers']):
+                layer_weights = generated_policy_weights[reading_channel][layer_idx]
+                if layer_idx == nca_config['policy_layers'] - 1:
+                    layer_weights = layer_weights[:action_dim, :]
+                if training and nca_config.get('torch_dropout_rate', 0) > 0:
+                    dropout_mask = (torch.rand_like(layer_weights) > 
+                                  nca_config['torch_dropout_rate'])
+                    scale = 1.0 / (1.0 - nca_config['torch_dropout_rate'])
+                    layer_weights = layer_weights * dropout_mask.to(layer_weights.device) * scale
+                p.out[2*layer_idx].weight = nn.Parameter(layer_weights, requires_grad=False)
 
-
-                    # for i in range(nca_config['policy_layers']):
-                    #     if i == nca_config['policy_layers'] - 1: # last layer of the policy
-                    #         p.out[2*i].weight = nn.Parameter(generated_policy_weights[reading_channel][i][:action_dim,:], requires_grad=False) 
-                    #     else:
-                    #         p.out[2*i].weight = nn.Parameter(generated_policy_weights[reading_channel][i], requires_grad=False) 
-                    
-                    if nca_config['NCA_MLP']:
-                        
-                        raise NotImplementedError
-                        
-                        
-                if debugging:
-                    
-                    for layer in list(ca.parameters()):
-                        print(f"NCA layer weight max: {layer.max()}, min: {layer.min()}")
-                    print(f"Policy weights max: {generated_policy_weights.max()}, min: {generated_policy_weights.min()}, mean: {generated_policy_weights.mean()}")
-                    
-                        
-                    
-                penalty = 0
-                if nca_config['penalty_off_topology']:                    
-                    raise NotImplementedError
-                    
-                    
-                # Prevents runnning environment in case the NCA pattern has died
-                if torch.sum(abs(generated_policy_weights)) == 0:
-                    if render:
-                        print('\nThe NCA produce an empty pattern, skipping simulation of the environment.\n')
-                    return np.inf
-
-            penalty = 0
-            
-            # Burnout phase for the bullet quadruped so it starts off from the floor
+            # Environment interaction loop
             if 'AntBullet' in environment:
                 action = np.zeros(8)
                 for _ in range(40):
-                    __ = env.step(action)        
-                    
-            # Inner loop
-            dim_first_fc = p.out[0].weight.shape[1]
+                    __ = env.step(action)  # Burn-in phase
+            
+            obs = observation
+            episode_reward = 0
             neg_count = 0
-            rew_ep = 0
-            t = 0
-            while True:
+            for t in range(1000):
+                obs_tensor = torch.tensor(obs)
+                action = p(obs_tensor).detach().numpy()
                 
-                # Generate and load policy networks with the NCA
-                if nca_config['plastic']:
-                    
-                    raise NotImplementedError
-                        
-                # For obaservation ∈ gym.spaces.Discrete, we one-hot encode the observation
-                if isinstance(env.observation_space, Discrete): 
-                    observation = (observation == torch.arange(env.observation_space.n))
-
+                if 'Bullet' in environment or isinstance(env.action_space, Box):
+                    action = np.tanh(action)
+                elif isinstance(env.action_space, Discrete):
+                    action = np.argmax(action)
                 
-                o3 = p(torch.tensor(observation))
+                obs, reward, done, _ = env.step(action)
+                episode_reward += reward
                 
-                # # Bounding the action space
-                if environment == 'CarRacing-v0':
-                    action = np.array([ torch.tanh(o3[0]), torch.sigmoid(o3[1]), torch.sigmoid(o3[2]) ]) 
-                    o3 = o3.numpy()
-                elif 'Bullet' in environment or str(env.action_space)[0:14] == 'Box(-1.0, 1.0,' or mujoco_env:
-                    o3 = np.tanh(o3).numpy()
-                    action = o3
-                else: 
-                    if isinstance(env.action_space, Box):
-                        action = o3.numpy()                         
-                        action = np.clip(action, env.action_space.low, env.action_space.high)  
-                    elif isinstance(env.action_space, Discrete):
-                        action = np.argmax(o3).numpy()
-        
-                if debugging:
-                # if True:
-                    print(o3)
-                    print(action)
-                    print('\n')
-                    
-                # Environment simulation step
-                observation, reward, done, info = env.step(action)  
-                if 'AntBullet' in environment: reward = env.unwrapped.rewards[1] # Distance walkel
-                rew_ep += reward
+                if pixel_env:
+                    obs = obs.flatten()
+                obs = obs.astype(np.float64)
                 
-                if environment[-12:-6] != 'Bullet' and render:
-                    env.render('human') # Gym envs
-                if render:
-                    time.sleep(0.005)
-                
-                if pixel_env: observation = observation.flatten()
-                observation = observation.astype(np.float64)
-                                    
                 # Early stopping conditions
                 if t > 100:
-                    if mujoco_env:
-                        neg_count = neg_count+1 if reward < 1.01 else 0
-                    else:
-                        neg_count = neg_count+1 if reward < 0.01 else 0
-                    
-                    if environment == 'CarRacing-v0':
-                        if (done or neg_count > 20):
-                            break
-                    elif 'Bullet' in environment:
-                        if (done or neg_count > 30):
-                            break
-                    else:
-                        if done or neg_count > 50:
-                            break
-                t += 1
-                
+                    threshold = 1.01 if mujoco_env else 0.01
+                    neg_count = neg_count + 1 if reward < threshold else 0
+                    if done or (neg_count > 50 if mujoco_env else neg_count > 30):
+                        break
+            
             env.close()
-            
-            cum_reward += (rew_ep - penalty)
-            
-            if render:
-                print(f"{environment} reward without penalty: {rew_ep}")
-        
-        
-    if debugging or render or visualise_weights or visualise_network:
-        print(f"\nEpisode cumulative reward {cum_reward}\n")
+            cum_reward += episode_reward
 
+    # LSH-based novelty calculation
+    pattern_buckets = []
     if len(patterns) > 0:
-        # Generate LSH components
+        # Validate pattern dimensions
         pattern_dim = len(patterns[0])
-        np.random.seed(LSH_SEED)
-        hash_fns = [(
-            np.random.randn(pattern_dim),  # Random projection vector
-            np.random.uniform(0, WIDTH)    # Bucket offset
-        ) for _ in range(L)]
+        if any(len(p) != pattern_dim for p in patterns):
+            raise ValueError("Inconsistent pattern dimensions for LSH")
         
-        # Generate hash signatures for new patterns
+        # Generate LSH hash functions
+        np.random.seed(LSH_SEED)
+        hash_fns = [(np.random.randn(pattern_dim), 
+                   np.random.uniform(0, WIDTH)) for _ in range(L)]
+        
+        # Compute bucket signatures
         pattern_buckets = []
         for p in patterns:
-            signature = [str(int(np.floor((np.dot(p, a) + b)/WIDTH))) for a, b in hash_fns]
+            signature = []
+            for a, b in hash_fns:
+                hash_val = np.floor((np.dot(p, a) + b) / WIDTH)
+                signature.append(str(int(hash_val)))
             pattern_buckets.append(signature)
-        
-    novelty_score = 0.0
-    
-    # with lock:
-    #     current_archive = list(archive)
-            
-    #     if len(current_archive) > 0 and len(patterns) > 0:
-    #         total_novelty = 0.0
-    #         num_patterns = 0
-    #         for pattern in patterns:
-    #             distances = [np.linalg.norm(pattern - a) for a in current_archive]
-    #             distances.sort()
-    #             k_actual = min(novelty_k, len(distances))
-    #             if k_actual > 0:
-    #                 avg_distance = sum(distances[:k_actual]) / k_actual
-    #                 total_novelty += avg_distance
-    #                 num_patterns += 1
-    #         if num_patterns > 0:
-    #             novelty_score = total_novelty / num_patterns
-    #     # Add new patterns to archive
-    #     for pattern in patterns:
-    #         archive.append(pattern)
 
+    novelty_score = 0.0
     with lock:
         current_archive = list(archive)
-        archive_buckets = [entry[1] for entry in current_archive]
         
         if current_archive and patterns:
-            total_novelty = 0
-            for p_idx, (pattern, buckets) in enumerate(zip(patterns, pattern_buckets)):
-                # Find candidates using LSH buckets
+            total_novelty = 0.0
+            valid_patterns = 0
+            
+            for pattern, buckets in zip(patterns, pattern_buckets):
+                # Find candidates through bucket matching
                 candidates = []
-                for a_idx, (archived_p, archived_buckets) in enumerate(current_archive):
+                for archived_p, archived_buckets in current_archive:
                     if any(b in archived_buckets for b in buckets):
                         candidates.append(archived_p)
                 
@@ -342,24 +214,21 @@ def fitnessRL(evolved_parameters, nca_config, archive, lock,render = False, debu
                 distances = [np.linalg.norm(pattern - cand) for cand in candidates]
                 distances.sort()
                 k_actual = min(novelty_k, len(distances))
-                total_novelty += sum(distances[:k_actual])/k_actual if k_actual > 0 else 0
+                
+                if k_actual > 0:
+                    avg_distance = sum(distances[:k_actual]) / k_actual
+                    total_novelty += avg_distance
+                    valid_patterns += 1
             
-            novelty_score = total_novelty/len(patterns)
-        
-        # Add to archive with buckets
+            if valid_patterns > 0:
+                novelty_score = total_novelty / valid_patterns
+
+        # Add new patterns to archive
         for p, b in zip(patterns, pattern_buckets):
-            archive.append((p, b))
+            archive.append((p.copy(), b))
 
-    # print("Cum Reward : ", cum_reward, "Novelty Score : ", novelty_score, "Weighted Novelty Score : ", novelty_score )
-
-    # Adjust fitness with novelty score       
     adjusted_fitness = -cum_reward - novelty_alpha * novelty_score
-
-    return adjusted_fitness, novelty_score
-
-
-
-
+    return (adjusted_fitness, novelty_score)
 
 def evaluate(argv):
     parser = argparse.ArgumentParser()
@@ -403,13 +272,11 @@ def evaluate(argv):
     evals = []
     runs = args.evaluation_runs
     for _ in range(runs):
-        evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, archive=[], lock=mp.Manager().Lock(),render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network, training=False)[0])
+        evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, archive=[], lock=mp.Manager().Lock(),render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network, training=False))
     evals = np.array(evals)
-    print(f'mean reward {np.mean(evals)}. Var: {np.std(evals)}. Shape {evals.shape}')
+    print(f'mean reward {np.mean(evals)}. Var: {    td(evals)}. Shape {evals.shape}')
 
-    
 if __name__ == '__main__':
     import argparse
-    import torch
     import sys
     evaluate(sys.argv)
