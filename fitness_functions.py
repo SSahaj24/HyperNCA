@@ -142,10 +142,10 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                             layer_weights = generated_policy_weights[reading_channel][i][:action_dim,:]
                         else:
                             layer_weights = generated_policy_weights[reading_channel][i]
-                            torch_dropout_rate = nca_config.get('torch_dropout_rate', 0.0)
-                            if training and torch_dropout_rate>0:
-                                dropout_mask = (torch.rand_like(layer_weights) > torch_dropout_rate)
-                                scale = 1.0 / (1.0 - torch_dropout_rate)
+                            layerwise_dropout_rate = nca_config.get('layerwise_dropout_rate', 0.0)
+                            if training and layerwise_dropout_rate>0:
+                                dropout_mask = (torch.rand_like(layer_weights) > layerwise_dropout_rate)
+                                scale = 1.0 / (1.0 - layerwise_dropout_rate)
                                 layer_weights = layer_weights * dropout_mask.to(layer_weights.device) * scale
                         p.out[2*i].weight = nn.Parameter(layer_weights, requires_grad=False)
                     

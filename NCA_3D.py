@@ -85,8 +85,8 @@ class CellCAModel3D(TorchModule):
     DEFAULT_CONFIG = {
         "perception_net_class":CellPerceptionNet,
         "update_net_class":SmallerCellUpdateNet,
-        "noise_std": 0.0,     # Gaussian noise standard deviation
-        "dropout_rate": 0.0,  # Cell dropout probability
+        "cell_noise": 0.0,     # Gaussian noise standard deviation
+        "nca_dropout_rate": 0.0,  # Cell dropout probability
         "network_dropout_rate": 0.0, # Network dropout probability
     }
 
@@ -112,8 +112,8 @@ class CellCAModel3D(TorchModule):
         self.replace = self.config.get('replace')
         self.debugging = self.config.get('debugging')
         self.tanh = torch.nn.Tanh()
-        self.noise_std = self.config.get("noise_std",0)
-        self.dropout_rate = self.config.get("dropout_rate",0)
+        self.cell_noise = self.config.get("cell_noise",0)
+        self.nca_dropout_rate = self.config.get("nca_dropout_rate",0)
         self.network_dropout_rate = self.config.get("network_dropout_rate",0)
 
             
@@ -132,17 +132,17 @@ class CellCAModel3D(TorchModule):
 
         out = self.perceive(x)
 
-        if self.noise_std > 0:
-            noise = torch.randn_like(out) * self.noise_std
+        if self.cell_noise > 0:
+            noise = torch.randn_like(out) * self.cell_noise
             out = out + noise
 
         out = self.update_network(out) 
 
-        if self.dropout_rate>0:
+        if self.nca_dropout_rate>0:
             living_cells = (self.alive(x) > 0).double().unsqueeze(1)
             if training:
-                dropout_mask = (torch.rand_like(x[:, :1]) > self.dropout_rate).double()
-                scale_mask = (1.0/(1 - self.dropout_rate)) * torch.ones_like(x[:, :1])
+                dropout_mask = (torch.rand_like(x[:, :1]) > self.nca_dropout_rate).double()
+                scale_mask = (1.0/(1 - self.nca_dropout_rate)) * torch.ones_like(x[:, :1])
             post_dropout_mask = dropout_mask * living_cells
             final_mask = post_dropout_mask * scale_mask
             out = out * final_mask

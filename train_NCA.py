@@ -76,8 +76,8 @@ def train(args):
                 "normalize": args['normalise'],
                 "NCA_bias": args['NCA_bias'],
                 "neighborhood": args['neighborhood'],
-                "noise_std": args['noise_std'],
-                "dropout_rate": args['dropout_rate'],
+                "cell_noise": args['cell_noise'],
+                "nca_dropout_rate": args['nca_dropout_rate'],
                 "network_dropout_rate": args['network_dropout_rate'],
             }
         )
@@ -155,8 +155,8 @@ def train(args):
         
     # NCA config
     nca_config = {
-        "noise_std": args['noise_std'],     # Adjust noise level
-        "dropout_rate": args['dropout_rate'], # Adjust dropout probability
+        "cell_noise": args['cell_noise'],     # Adjust noise level
+        "nca_dropout_rate": args['nca_dropout_rate'], # Adjust dropout probability
         "network_dropout_rate": args['network_dropout_rate'], # Adjust network dropout probability
         "environment" : args['environment'],
         "popsize" : args['popsize'],
@@ -187,7 +187,7 @@ def train(args):
         "seeds_size" : [seeds_flatten[i].shape[0] if args['co_evolve_seed'] else None for i in range(len(seeds_flatten))],
         "nb_envs" : len(environments),
         "policy_layers" : args['policy_layers'],
-        "torch_dropout_rate" : args['torch_dropout_rate']
+        "layerwise_dropout_rate" : args['layerwise_dropout_rate']
     }
     
     if nca_config['NCA_dimension'] == 2:
@@ -360,7 +360,7 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
     # Load configuration from saved model
     saved_config = load_config_from_saved_model(model_id)
     
-    # Set up sweep configuration focusing on noise_std and dropout_rate
+    # Set up sweep configuration focusing on cell_noise and nca_dropout_rate
     sweep_config = {
         'method': 'bayes',  # Bayesian optimization
         'metric': {
@@ -368,11 +368,11 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             'goal': 'maximize'
         },
         'parameters': {
-            'noise_std': {
+            'cell_noise': {
                 'min': 0.0,
                 'max': 0.4
             },
-            'dropout_rate': {
+            'nca_dropout_rate': {
                 'min': 0.0,
                 'max': 0.4
             },
@@ -429,8 +429,8 @@ def wandb_sweep(model_id="1645447353", trial_count=20):
             
             # Use the swept hyperparameters
             # 'policy_layers': wandb_config.policy_layers,
-            'noise_std': saved_config.get('noise_std', 0), #wandb_.noise_std,
-            'dropout_rate': saved_config.get('dropout_rate', 0), #dropout_rate
+            'cell_noise': saved_config.get('cell_noise', 0), #wandb_.cell_noise,
+            'nca_dropout_rate': saved_config.get('nca_dropout_rate', 0), #nca_dropout_rate
             'network_dropout_rate': saved_config.get('network_dropout_rate',0),
             'NCA_channels' : wandb_config.NCA_channels,
         
@@ -464,9 +464,6 @@ if __name__ == "__main__":
     parser.add_argument('--policy_layers', type=int,  default=4, metavar='', help='Number of layers of the policy.')
     parser.add_argument('--NCA_bias', type=bool,  default=False, metavar='', help='Whether the NCA has bias')
     parser.add_argument('--neighborhood', type=str,  default='Moore', metavar='', help='Neighborhood definition: Whether to use "Von Neumann" neighborhood (4+1) or "Moore" (8+1), both with Manhattan and Chebyshev distance respectively of 1.')
-    parser.add_argument('--noise_std', type=float, default=0.00, metavar='', help='Gaussian noise standard deviation applied during NCA updates')
-    parser.add_argument('--dropout_rate', type=float, default=0.00, metavar='', help='Cell dropout probability during NCA updates')
-    parser.add_argument('--network_dropout_rate', type=float, default=0.00, metavar='', help='Cell dropout probability during NCA updates')
     parser.add_argument('--save_model', default=True, action=argparse.BooleanOptionalAction, help='If called, it will not save the resulting model')
     parser.add_argument('--random_seed', default=False, action=argparse.BooleanOptionalAction, help='If true and seed is type random, the NCA uses a random seed at each episode')
     parser.add_argument('--random_seed_env', default=True, action=argparse.BooleanOptionalAction, help='If true is uses a random seed to run the gym environments at each episode')
@@ -481,7 +478,11 @@ if __name__ == "__main__":
     parser.add_argument('--run_sweep', default=False, action=argparse.BooleanOptionalAction, help='Run a wandb sweep for hyperparameter optimization')
     parser.add_argument('--model_id', type=str, default="1645447353", metavar='', help='ID of the saved model to use as base configuration for sweep')
     parser.add_argument('--trial_count', type=int, default=20, metavar='', help='Number of trials to run in the sweep')
-    parser.add_argument('--torch_dropout_rate', type=float, default=0.0, metavar='', help='Fraction of weights to dropout in each policy layer')
+
+    parser.add_argument('--cell_noise', type=float, default=0.00, metavar='', help='Gaussian noise standard deviation applied during NCA updates')
+    parser.add_argument('--nca_dropout_rate', type=float, default=0.00, metavar='', help='Cell dropout probability during NCA updates')
+    parser.add_argument('--network_dropout_rate', type=float, default=0.00, metavar='', help='Cell dropout probability during NCA updates')
+    parser.add_argument('--layerwise_dropout_rate', type=float, default=0.0, metavar='', help='Fraction of weights to dropout in each policy layer')
 
     args = parser.parse_args()
     
