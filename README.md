@@ -32,17 +32,38 @@ This repository contains code for growing neural networks using the HyperNCA met
 
 ## Installation
 
-First, ensure you have Python >= 3.9 installed. Then:
+These steps ensure that the BulletAnt environments work correctly. Setting this up was non-trivial and took significant time to figure out, so please follow carefully.
 
 ```bash
 # Clone the repository
 git clone https://github.com/SSahaj24/HyperNCA
 
-# Navigate to project directory
+# Navigate to the project directory
 cd HyperNCA
+
+# Install Python 3.10 (required)
+# You can use pyenv or your system's package manager
+
+# Example using pyenv:
+pyenv install 3.10.0
+pyenv virtualenv 3.10.0 venv
+pyenv activate venv
+
+# OR, if python3.10 is already installed:
+# python3.10 -m venv venv
+# source venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# ⚠️ IMPORTANT: Patch the BulletAnt environments manually
+# This step is required and was discovered after much trial and error
+
+# Move XML files to pybullet_data/mjcf
+mv -f bullet\ ants/*.xml venv/lib/python3.10/site-packages/pybullet_data/mjcf/
+
+# Move Python environment files to pybullet_envs
+mv -f bullet\ ants/*.py venv/lib/python3.10/site-packages/pybullet_envs/
 ```
 
 ## Usage
@@ -115,6 +136,8 @@ To evaluate the reported metamorphosis model:
 git checkout metamorphosis
 python fitness_functions.py --id 1644785913
 ```
+
+However, within the scope of the CS6024 project, we were unable to get the metamorphosis training working.
 
 ## Acknowledgments
 
