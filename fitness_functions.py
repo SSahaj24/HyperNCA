@@ -134,6 +134,10 @@ def fitnessRL(evolved_parameters, nca_config, render = False, debugging=False, v
                     else:                    
                         new_pattern, _weights_for_pca_ = ca.forward(seed, steps=nca_config['NCA_steps'], reading_channel=nca_config['reading_channel'], policy_layers = nca_config['policy_layers'], run_pca=False, visualise_weights=visualise_weights, visualise_network=visualise_network, inOutdim=[input_dim,action_dim], training=training)
                         generated_policy_weights = new_pattern.detach()[0]
+                        policy_noise = nca_config.get('policy_noise', 0.0)
+                        if training and policy_noise > 0:
+                            noise = torch.randn_like(generated_policy_weights) * policy_noise
+                            generated_policy_weights += noise
                         
                     # Load generated weights into policy network 
                     reading_channel = nca_config['reading_channel']
