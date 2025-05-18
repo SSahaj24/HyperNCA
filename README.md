@@ -1,92 +1,120 @@
- 
+
 ---
 
-<div align="center">    
- 
-# HyperNCA: Growing Developmental Networks with Neural Cellular Automata
+<div align="center">
+
+# HyperNCA revisited: Exploring Multi-environment and Novelty-based training
 
 [![Paper](https://img.shields.io/badge/paper-arxiv.2204.11674-B31B1B.svg)](https://arxiv.org/abs/2204.11674)
-
 </div>
- 
-This reposistory contains the code to grow networks using our HyperNCA method on any state-vector based [Gym environment](https://github.com/openai/gym/wiki/Table-of-environments) or [pyBullet environment](https://github.com/bulletphysics/bullet3) as described in our paper [HyperNCA: Growing Developmental Networks  with Neural Cellular Automata, 2022](https://arxiv.org/abs/2204.11674).
-Additionally, you can train any custom environment by [registering them.](https://github.com/openai/gym/wiki/Environments)
-<!-- 
-<p align="center">
-  <img src="images/carsmallest.gif" />
-</p> -->
+
+---
+
+## Branches
+- **main**: Standard HyperNCA with multi-environment and regularization extensions.
+- **metamorphosis**: Implements metamorphosis neural networks with morphing weights logic, with setup instructions included.
+- **novelty**: Implements novelty-based fitness using Locality Sensitive Hashing (LSH) for efficient exploration (see below).
+
+This readme just describes the main branch; switch to the other branch for relevant instructions.
+
+---
+
+This repository is a fork of the original HyperNCA paper, extended for CS6024 Course Project. We explore multi-environment training and novelty-based approaches to enhance the original HyperNCA architecture.
+
 ![](images/main.png)
 
+## Overview
 
-## How to run   
-<!-- <img src="http://www.sciweavers.org/tex2img.php?eq=%20%5Csqrt%7Bab%7D%20&bc=White&fc=Black&im=tif&fs=12&ff=arev&edit=0" align="center" border="0" alt=" \sqrt{ab} " width="" height="" /> -->
-First, install dependencies. Use `Python >= 3.9`:
+This repository contains code for growing neural networks using the HyperNCA method, with extensions for:
+- Noise and Dropout regularization
+- Multi-environment training capabilities
+- Novelty-based training approaches
+
+## Installation
+
+These steps ensure that the BulletAnt environments work correctly. Setting this up was non-trivial and took significant time to figure out, so please follow carefully.
+
 ```bash
-# clone project   
-git clone https://github.com/enajx/HyperNCA   
+# Clone the repository
+git clone https://github.com/SSahaj24/HyperNCA
 
-# install dependencies   
-cd HyperNCA 
+# Navigate to the project directory
+cd HyperNCA
+
+# Install Python 3.10 (required)
+# You can use pyenv or your system's package manager
+
+# Example using pyenv:
+pyenv install 3.10.0
+pyenv virtualenv 3.10.0 venv
+pyenv activate venv
+
+# OR, if python3.10 is already installed:
+# python3.10 -m venv venv
+# source venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
- ```   
- Next, use `train_NCA.py` to train an agent. You can train any state-vector based OpenAI Gym's or pyBullet environments:
- 
- ```bash
-# train HyperNCA to solve the Lunar Lander:
+
+# ⚠️ IMPORTANT: Patch the BulletAnt environments manually
+# This step is required and was discovered after much trial and error
+
+# Move XML files to pybullet_data/mjcf
+mv -f bullet\ ants/*.xml venv/lib/python3.10/site-packages/pybullet_data/mjcf/
+
+# Move Python environment files to pybullet_envs
+mv -f bullet\ ants/*.py venv/lib/python3.10/site-packages/pybullet_envs/
+```
+
+## Usage
+
+### Training
+
+To train an agent using HyperNCA, use the `train_NCA.py` script:
+
+```bash
+# Example: Train HyperNCA on Lunar Lander
 python train_NCA.py --environment LunarLander-v2
-
 ```
 
- Use `python train_NCA.py --help` to display all the training options:
-
-
- ```
-
-train_NCA.py [-h] [--environment  [...]] [--generations] [--popsize] [--print_every] [--x0_dist] 
-    [--sigma_init] [--threads] [--seed_type] [--NCA_steps] [--NCA_dimension] [--size_substrate]
-    [--NCA_channels] [--reading_channel] [--update_net_channel_dims] [--living_threshold] [--policy_layers]
-    [--NCA_bias] [--neighborhood] [--save_model | --no-save_model] [--random_seed | --no-random_seed] 
-    [--random_seed_env | --no-random_seed_env] [--normalise | --no-normalise] [--replace | --no-replace] 
-    [--co_evolve_seed | --no-co_evolve_seed] [--plastic | --no-plastic]
-
-arguments:
-  
-  --environment         Environment: any state-vector OpenAI Gym or pyBullet environment may be used
-  --generations         Number of generations that the ES will run.
-  --popsize             Population size.
-  --print_every         Print every N steps.
-  --x0_dist             Distribution used to sample intial value for CMA-ES
-  --sigma_init          Initial sigma: modulates the amount of noise used to populate each new generation. 
-  --threads             Number of threads used to run evolution in parallel: -1 uses all physical cores available.
-  --seed_type           Seed type: single_seed, randomU2: [-1,1]
-  --NCA_steps           NCA steps
-  --NCA_dimension       NCA dimension: 3 uses a single 3D seed and 3DConvs
-  --size_substrate      Size of every fc layer (3D). For 3D: if 0, it takes the smallest size needed.
-  --NCA_channels        NCA channels
-  --reading_channel     Seed channel from which the pattern will be taken to become the NN weigths.
-  --NCA_bias            Whether the NCA has bias
-  --random_seed         If true and seed is type random, the NCA uses a random seed at each episode (default: False)
-  --random_seed_env     If true is uses a random seed to run the gym environments at each episode (default: True)
-  --normalise           Normalise NCA output (default: True)
-
-
+For all available training options, run:
+```bash
+python train_NCA.py --help
 ```
 
-Once trained, use `fitness_functions.py --id <run_id>` to test the grown network, eg, to evaluate the reported model in the paper for the Lunar Lander:
- ```python
+Key training parameters include:
+- `--environment`: Any state-vector OpenAI Gym or pyBullet environment
+- `--generations`: Number of ES generations
+- `--popsize`: Population size
+- `--NCA_steps`: Number of NCA steps
+- `--NCA_dimension`: NCA dimension (3 uses a single 3D seed and 3DConvs)
+- `--NCA_channels`: Number of NCA channels
+- `--seed_type`: Seed type (single_seed, randomU2: [-1,1])
 
-python fitness_functions.py --id 1645360631
+### Novelty Fitness Function Parameters
+- `--novelty_alpha`: The weight for the novelty score in the fitness function
+- `--novelty_k`: The number of nearest neighbours to check for novelty computation
 
+### Weights & Biases Integration
+- `--use_wandb`: Enable Weights & Biases for experiment tracking
+- `--wandb_log_interval`: Log to wandb every N generations
+- `--run_sweep`: Run a wandb sweep for hyperparameter optimization
+- `--model_id`: ID of the saved model to use as base configuration for sweep
+- `--trial_count`: Number of trials to run in the sweep
+
+### Evaluation
+
+To evaluate a trained model:
+
+```bash
+python fitness_functions.py --id <run_id>
 ```
 
+### Reproducing Results
 
-## Reproduce the paper's results and evaluate the reported models in the paper
+The following model IDs are available for evaluation:
 
-Use `python fitness_functions.py --id <run_id>` to evaluate reported models:
-
-
-
-| Id            | Enviroment    | Substrate |
+| Id            | Environment    | Substrate |
 | ------------- |:-------------:| ------:|
 | 1645447353    | Lander        | Random 5 layers |
 | 1646940683    | Lander        | Single 4 layers |
@@ -94,26 +122,29 @@ Use `python fitness_functions.py --id <run_id>` to evaluate reported models:
 | 1645360631    | Quadruped     | Random 3 layers |
 | 1645605120    | Quadruped     | Random 30 layers |
 
+Model configuration files can be found in the `saved_models` directory.
 
-If you want to train the model, you can find the specific parameters on use to train the models o each of the model configuration `.yml` files in `saved_models`. 
+## Metamorphosis Neural Networks
 
+The metamorphosis branch contains code for training metamorphosis neural networks. The implementation uses the same NCA architecture but with modified logic for morphing weights in the RL agent.
 
-## Methamorphosis neural networks
+To evaluate the reported metamorphosis model:
+```bash
+git checkout metamorphosis
+python fitness_functions.py --id 1644785913
+```
 
-To code to train the *Methamorphosis neural networks*, can be found in the *metamorphosis* branch of this repository. The NCA implementations are identical to the one used in this branch, the only code difference is the logic flow to make use of the morphing weights into the RL agent. The id of the reported metamorphosis model is 1644785913 and be evaluated in the metamorphosis branch with `python fitness_functions.py --id 1644785913`
+However, within the scope of the CS6024 project, we were unable to get the metamorphosis training working.
 
-![](images/metamorphosis.png)
+## Acknowledgments
 
-The different quadruped morphologies can be found in the folder *bullet ants*. In order to 
-reproduce the damaged quadruped results, these new morphologies need to be firstly [registered as custom environments](https://github.com/openai/gym/wiki/Environments). The modified files are all included in the folder.
+This work builds upon the original HyperNCA paper by Najarro et al. (2022). We extend our sincere gratitude to Elias Najarro, Shyam Sudhakaran, Claire Glanois, and Sebastian Risi for their groundbreaking work on growing developmental networks with neural cellular automata. Their original implementation and insights have been invaluable to our research.
 
+## Citation
 
-## Citation   
-
-If you use the code for academic or commecial use, please cite the associated paper:
+If you use this code in your research, please cite the original paper which this fork builds on:
 
 ```bibtex
-
 @inproceedings{najarro2022hypernca,
   title={HyperNCA: Growing Developmental Networks with Neural Cellular Automata},
   author={Najarro, Elias and Sudhakaran, Shyam and Glanois, Claire and Risi, Sebastian},
@@ -122,5 +153,4 @@ If you use the code for academic or commecial use, please cite the associated pa
   booktitle={From Cells to Societies: Collective Learning across Scales},
   year={2022}
 }
-
-```   
+```
