@@ -274,7 +274,7 @@ def evaluate(argv):
     for _ in range(runs):
         evals.append(-1*fitnessRL(evolved_parameters=evolved_parameters, nca_config=nca_config, archive=[], lock=mp.Manager().Lock(),render=args.render, visualise_weights=args.visualise_weigths, visualise_network=args.visualise_network, training=False))
     evals = np.array(evals)
-    print(f'mean reward {np.mean(evals)}. Var: {    td(evals)}. Shape {evals.shape}')
+    print(f'mean reward {np.mean(evals)}. Var: {np.std(evals)}. Shape {evals.shape}')
 
 if __name__ == '__main__':
     import argparse
